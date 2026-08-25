@@ -84,6 +84,11 @@ inside it.
 `opacity`. A motion frame is not a declaration. It reaches the style sink after
 the resolved style does, so an animated element keeps its cached resolution.
 
+**Isolated layout tree.** A taffy tree of its own, for laying content out while
+the main tree computes. Taffy runs one tree at a time, so an element that sizes
+itself from content it has to measure needs a second tree. `IsolatedLayout` in
+GPUI holds it, and `AutoHeight` is the element that uses it.
+
 **Resolved style.** The output of the resolve phase for one element: computed
 values plus the conditional blocks that paint may still apply. Cached on the
 retained element and dropped when the style changes.

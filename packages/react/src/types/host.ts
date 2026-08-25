@@ -7,10 +7,11 @@ export interface MotionStyle {
   /**
    * A length in pixels, or `"auto"` for the height the content takes.
    *
-   * `"auto"` is measured every frame, so the animation follows content that
-   * changes while it runs. The measurement happens before the element knows
-   * its own width, so declare a pixel `width` to make it exact. Without one
-   * the content measures unwrapped, which reads short for text that wraps.
+   * `"auto"` is measured at the width the element really gets, whether that
+   * comes from a declared length, from `flex`, from a percentage or from a
+   * stretched cross axis, so text wraps the way it will on screen. The
+   * measurement repeats every frame, so the animation follows content that
+   * changes while it runs.
    */
   height?: number | "auto"
   opacity?: Numeric
