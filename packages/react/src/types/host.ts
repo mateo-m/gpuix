@@ -4,7 +4,15 @@ export type DimensionValue = number | string
 
 export interface MotionStyle {
   width?: number
-  height?: number
+  /**
+   * A length in pixels, or `"auto"` for the height the content takes.
+   *
+   * `"auto"` is measured every frame, so the animation follows content that
+   * changes while it runs. The measurement happens before the element knows
+   * its own width, so declare a pixel `width` to make it exact. Without one
+   * the content measures unwrapped, which reads short for text that wraps.
+   */
+  height?: number | "auto"
   opacity?: Numeric
   top?: Numeric
   right?: Numeric

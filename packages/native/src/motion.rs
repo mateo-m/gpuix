@@ -10,7 +10,7 @@ use crate::style::{DimensionValue, StyleDesc};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct MotionStyle {
     pub width: Option<f64>,
-    pub height: Option<f64>,
+    pub height: Option<MotionHeight>,
     pub opacity: Option<f64>,
     pub top: Option<f64>,
     pub right: Option<f64>,
@@ -19,15 +19,74 @@ pub(crate) struct MotionStyle {
     pub border_radius: Option<f64>,
 }
 
+/// One end of a `height` interpolation.
+///
+/// CSS Values 5 calls an interpolation with a keyword at one end an
+/// `interpolate-size`. `auto` has no number until layout runs, so it stays a
+/// keyword here and the element that owns the height resolves it.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(untagged)]
+pub(crate) enum MotionHeight {
+    Length(f64),
+    Keyword(HeightKeyword),
+}
+
+/// The size keywords a `height` animation accepts.
+#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+pub(crate) enum HeightKeyword {
+    #[serde(rename = "auto")]
+    Auto,
+}
+
+impl MotionHeight {
+    /// This end as a number, or `None` when it is a keyword.
+    fn length(self) -> Option<f64> {
+        match self {
+            Self::Length(value) => Some(value),
+            Self::Keyword(HeightKeyword::Auto) => None,
+        }
+    }
+}
+
+/// A `height` interpolation with `auto` at one end or both.
+///
+/// `None` means `auto`. Only layout knows what number that is, so the element
+/// that owns the height measures its content and calls `resolve`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(crate) struct HeightTween {
+    pub from: Option<f64>,
+    pub to: Option<f64>,
+    pub progress: f64,
+}
+
+impl HeightTween {
+    /// The height for this frame, given the height the content takes.
+    pub(crate) fn resolve(self, content: f64) -> f64 {
+        let from = self.from.unwrap_or(content);
+        let to = self.to.unwrap_or(content);
+        from + (to - from) * self.progress
+    }
+}
+
 impl MotionStyle {
     fn interpolate(self, target: Self, progress: f64) -> Self {
         fn value(from: Option<f64>, to: Option<f64>, progress: f64) -> Option<f64> {
             to.map(|to| from.unwrap_or(to) + (to - from.unwrap_or(to)) * progress)
         }
 
+        // A keyword at either end leaves `height` alone. `MotionState::frame`
+        // hands that case to the renderer as a `HeightTween` instead.
+        let height = match (self.height, target.height) {
+            (from, Some(MotionHeight::Length(to))) => {
+                let from = from.and_then(MotionHeight::length).unwrap_or(to);
+                Some(MotionHeight::Length(from + (to - from) * progress))
+            }
+            _ => None,
+        };
+
         Self {
             width: value(self.width, target.width, progress),
-            height: value(self.height, target.height, progress),
+            height,
             opacity: value(self.opacity, target.opacity, progress),
             top: value(self.top, target.top, progress),
             right: value(self.right, target.right, progress),
@@ -41,7 +100,7 @@ impl MotionStyle {
         if let Some(value) = self.width {
             style.width = Some(DimensionValue::Pixels(value));
         }
-        if let Some(value) = self.height {
+        if let Some(MotionHeight::Length(value)) = self.height {
             style.height = Some(DimensionValue::Pixels(value));
         }
         if let Some(value) = self.opacity {
@@ -120,6 +179,9 @@ struct MotionDescription {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MotionFrame {
     pub style: MotionStyle,
+    /// The `height` interpolation when `auto` is at one end of it, which
+    /// `style` cannot carry because it has no number yet.
+    pub height: Option<HeightTween>,
     pub active: bool,
 }
 
@@ -210,8 +272,16 @@ impl MotionState {
         let active = self.from != self.target && raw < 1.0;
         let progress = ease(raw.clamp(0.0, 1.0), &self.transition.ease);
 
+        let keyword_at_either_end = matches!(self.target.height, Some(MotionHeight::Keyword(_)))
+            || matches!(self.from.height, Some(MotionHeight::Keyword(_)));
+
         MotionFrame {
             style: self.from.interpolate(self.target, progress),
+            height: (keyword_at_either_end && self.target.height.is_some()).then(|| HeightTween {
+                from: self.from.height.and_then(MotionHeight::length),
+                to: self.target.height.and_then(MotionHeight::length),
+                progress,
+            }),
             active,
         }
     }
@@ -237,7 +307,7 @@ fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, St
 fn validate_style(style: &MotionStyle) -> Result<(), String> {
     for (name, value) in [
         ("width", style.width),
-        ("height", style.height),
+        ("height", style.height.and_then(MotionHeight::length)),
         ("opacity", style.opacity),
         ("top", style.top),
         ("right", style.right),
@@ -250,7 +320,10 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
         }
     }
     if style.width.is_some_and(|value| value < 0.0)
-        || style.height.is_some_and(|value| value < 0.0)
+        || style
+            .height
+            .and_then(MotionHeight::length)
+            .is_some_and(|value| value < 0.0)
         || style.border_radius.is_some_and(|value| value < 0.0)
     {
         return Err("motion sizes and borderRadius must be non-negative".to_string());
