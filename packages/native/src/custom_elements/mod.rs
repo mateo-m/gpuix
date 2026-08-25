@@ -46,9 +46,23 @@ pub struct CustomRenderContext<'a> {
     pub selectable: bool,
     /// Inherited selection wash colour.
     pub selection_wash: gpui::Hsla,
+    /// Everything this element inherits, so `var()` and `currentColor` in its
+    /// style resolve the same way they do on a plain div.
+    pub cascade: crate::inheritance::Inherited,
 }
 
 impl CustomRenderContext<'_> {
+    /// Apply this element's `style` prop, if it has one.
+    ///
+    /// Every custom element that takes a style calls this rather than
+    /// `apply_styles`, so none of them can forget the variable scope.
+    pub fn styled<E: gpui::Styled>(&self, el: E) -> E {
+        let Some(style) = self.style else {
+            return el;
+        };
+        crate::renderer::apply_styles(el, style, &self.cascade.scope())
+    }
+
     /// Build a selectable text run for this element. `sub` distinguishes
     /// multiple runs painted by the same element, such as code-block lines, and
     /// must be stable across frames or the selection flickers.

@@ -91,9 +91,7 @@ impl CustomElement for ImgElement {
                 .text_color(gpui::rgba(0xa4accdff))
                 .child("img: no src");
 
-            if let Some(style) = ctx.style {
-                fallback = crate::renderer::apply_styles(fallback, style);
-            }
+            fallback = ctx.styled(fallback);
 
             return fallback.into_any_element();
         }
@@ -114,9 +112,7 @@ impl CustomElement for ImgElement {
                     .into_any_element()
             });
 
-        if let Some(style) = ctx.style {
-            el = crate::renderer::apply_styles(el, style);
-        }
+        el = ctx.styled(el);
 
         el.into_any_element()
     }
@@ -201,9 +197,7 @@ impl CustomElement for SvgElement {
 
         let Some(bytes) = self.bytes.as_deref() else {
             let mut empty = gpui::div();
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
+            empty = ctx.styled(empty);
             return empty.into_any_element();
         };
 
@@ -213,9 +207,7 @@ impl CustomElement for SvgElement {
             .and_then(crate::color::parse_color_rgba)
             .unwrap_or_else(|| gpui::rgb(0xe2e2e2).into());
         let mut icon = gpui::svg().data(bytes).flex_none().text_color(tint);
-        if let Some(style) = ctx.style {
-            icon = crate::renderer::apply_styles(icon, style);
-        }
+        icon = ctx.styled(icon);
         icon.into_any_element()
     }
 

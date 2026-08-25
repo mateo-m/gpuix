@@ -1,10 +1,12 @@
-/// Event types for Rust → JS communication.
-/// Element IDs are f64 (JS numbers) — lossless for integers up to 2^53.
-///
-/// EventPayload is the single struct sent across the napi boundary for ALL
-/// event types. Fields are optional — each event type populates only the
-/// fields it needs. This avoids N different napi structs while keeping the
-/// FFI surface small.
+//! What an event looks like on the way from Rust back to JavaScript.
+//!
+//! Element ids travel as f64, because that is what a JavaScript number is.
+//! Every integer up to 2^53 survives the trip unchanged.
+//!
+//! `EventPayload` is the one struct that crosses napi for every event type.
+//! Each field is optional, and one event type fills in only the fields it
+//! needs. One struct with optional fields keeps the FFI small, where a struct
+//! per event type would not.
 use napi_derive::napi;
 
 /// Event payload sent back to JS when a user interacts with an element.

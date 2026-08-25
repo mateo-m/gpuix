@@ -1,15 +1,16 @@
 #![deny(clippy::all)]
 
 mod automation;
+mod inheritance;
 mod color;
 mod custom_elements;
 mod diff;
-mod element_tree;
+mod events;
 mod markdown;
 mod motion;
 mod renderer;
 mod retained_tree;
-mod style;
+pub mod style;
 mod syntax;
 mod text;
 mod theme;
@@ -17,6 +18,6 @@ mod theme;
 #[cfg(all(feature = "test-support", target_os = "macos"))]
 mod test_renderer;
 
-pub use element_tree::*;
+pub use events::*;
 pub use renderer::*;
 pub use style::*;

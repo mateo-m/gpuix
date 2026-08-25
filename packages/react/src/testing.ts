@@ -16,6 +16,7 @@ import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
   NativeRenderer,
+  RootOptions,
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
@@ -50,6 +51,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   cycleDebugFrameOverlay(): string
   resetDebugFrameOverlayStats(): void
   getDebugFrameOverlayStats(): DebugFrameOverlayStats
+  styleResolutions(): number
+  resetStyleResolutions(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
   getPaintedText(): string[]
@@ -528,6 +531,16 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getDebugFrameOverlayStats()
   }
 
+  /** How many styles the renderer resolved since the last reset.
+   *  A frame that changes nothing must not raise this. */
+  styleResolutions(): number {
+    return this.native.styleResolutions()
+  }
+
+  resetStyleResolutions(): void {
+    this.native.resetStyleResolutions()
+  }
+
   /** Capture a screenshot of the current rendered UI and save as PNG.
    *  macOS only — requires Metal GPU rendering via VisualTestAppContext. */
   captureScreenshot(path: string): void {
@@ -556,9 +569,9 @@ export interface TestRoot {
  * Returns the Root (for rendering), the TestRenderer (for inspection/events),
  * and convenience methods.
  */
-export function createTestRoot(): TestRoot {
+export function createTestRoot(options: RootOptions = {}): TestRoot {
   const renderer = new TestRenderer()
-  const root = createRoot(renderer)
+  const root = createRoot(renderer, options)
 
   const render = (node: ReactNode): void => {
     flushSync(() => root.render(node))

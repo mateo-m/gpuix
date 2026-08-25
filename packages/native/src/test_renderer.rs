@@ -19,7 +19,7 @@ use napi_derive::napi;
 
 use gpui::AppContext as _;
 
-use crate::element_tree::EventPayload;
+use crate::events::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
     parse_debug_frame_overlay_mode, DebugFrameOverlayStats,
@@ -208,7 +208,7 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
         let id = to_element_id(id)?;
-        let style: StyleDesc = serde_json::from_str(&style_json)
+        let style = StyleDesc::from_json_boxed(&style_json)
             .map_err(|e| Error::from_reason(format!("Failed to parse style: {}", e)))?;
         self.tree.lock().unwrap().set_style(id, style);
         Ok(())
@@ -263,6 +263,25 @@ impl TestGpuixRenderer {
     /// In tests, this is a no-op — flush() handles the actual re-render.
     #[napi]
     pub fn commit_mutations(&self) -> Result<()> {
+        Ok(())
+    }
+
+    /// How many styles the renderer has resolved since the last reset.
+    ///
+    /// The performance tests read this instead of measuring wall-clock time.
+    /// GPUI rebuilds its element tree every frame, so the number that matters
+    /// is how much of that rebuild repeats work the renderer already did. A
+    /// frame that changes nothing must add nothing here. A wall-clock budget
+    /// flakes on a loaded machine, and a flaky gate gets muted.
+    #[napi]
+    pub fn style_resolutions(&self) -> f64 {
+        crate::style::resolve::resolutions() as f64
+    }
+
+    /// Set the style resolution counter back to zero.
+    #[napi]
+    pub fn reset_style_resolutions(&self) -> Result<()> {
+        crate::style::resolve::reset_resolutions();
         Ok(())
     }
 
