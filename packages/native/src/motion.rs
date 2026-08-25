@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use serde::Deserialize;
 
-use crate::style::{DimensionValue, StyleDesc};
+use crate::style::StyleDesc;
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq)]
 #[serde(rename_all = "camelCase")]
@@ -19,76 +19,108 @@ pub(crate) struct MotionStyle {
     pub border_radius: Option<f64>,
 }
 
-/// One end of a `height` interpolation.
+/// A `height`, as a number of pixels plus a share of the height the content
+/// takes.
 ///
 /// CSS Values 5 calls an interpolation with a keyword at one end an
 /// `interpolate-size`. `auto` has no number until layout runs, so it stays a
-/// keyword here and the element that owns the height resolves it.
+/// share here and the element that owns the height multiplies it out.
+///
+/// Both parts are needed because a frame part way between `auto` and a length
+/// is part of each. Half way from `0` to `auto` is half the content, and
+/// retargeting there has to start from that, which one number cannot hold.
 #[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
+#[serde(from = "HeightWire")]
+pub(crate) struct MotionHeight {
+    pixels: f64,
+    content: f64,
+}
+
+/// What a `height` looks like on the wire: a number of pixels or `"auto"`.
+///
+/// A motion description parses once per change, so the buffering an untagged
+/// enum does costs nothing here, unlike the 36 fields that read `Numeric`.
+#[derive(Deserialize)]
 #[serde(untagged)]
-pub(crate) enum MotionHeight {
-    Length(f64),
+enum HeightWire {
+    Pixels(f64),
     Keyword(HeightKeyword),
 }
 
-/// The size keywords a `height` animation accepts.
-#[derive(Clone, Copy, Debug, Deserialize, PartialEq)]
-pub(crate) enum HeightKeyword {
+#[derive(Deserialize)]
+enum HeightKeyword {
     #[serde(rename = "auto")]
     Auto,
 }
 
-impl MotionHeight {
-    /// This end as a number, or `None` when it is a keyword.
-    fn length(self) -> Option<f64> {
-        match self {
-            Self::Length(value) => Some(value),
-            Self::Keyword(HeightKeyword::Auto) => None,
+impl From<HeightWire> for MotionHeight {
+    fn from(wire: HeightWire) -> Self {
+        match wire {
+            HeightWire::Pixels(value) => Self::pixels(value),
+            HeightWire::Keyword(HeightKeyword::Auto) => Self::content(),
         }
     }
 }
 
-/// A `height` interpolation with `auto` at one end or both.
-///
-/// `None` means `auto`. Only layout knows what number that is, so the element
-/// that owns the height measures its content and calls `resolve`.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct HeightTween {
-    pub from: Option<f64>,
-    pub to: Option<f64>,
-    pub progress: f64,
+impl MotionHeight {
+    fn pixels(value: f64) -> Self {
+        Self {
+            pixels: value,
+            content: 0.0,
+        }
+    }
+
+    /// `auto`, the whole height the content takes.
+    fn content() -> Self {
+        Self {
+            pixels: 0.0,
+            content: 1.0,
+        }
+    }
+
+    /// Whether this needs the height of the content before it is a number.
+    pub(crate) fn needs_content(self) -> bool {
+        self.content != 0.0
+    }
+
+    /// This as a number, or `None` while it still needs the content.
+    pub(crate) fn length(self) -> Option<f64> {
+        (!self.needs_content()).then_some(self.pixels)
+    }
+
+    fn mix(self, to: Self, progress: f64) -> Self {
+        Self {
+            pixels: mix(self.pixels, to.pixels, progress),
+            content: mix(self.content, to.content, progress),
+        }
+    }
+
+    /// The height this means, given the height the content takes.
+    pub(crate) fn resolve(self, content: f64) -> f64 {
+        // An easing that overshoots can carry a collapse below zero, and CSS
+        // has no negative `height`.
+        (self.pixels + self.content * content).max(0.0)
+    }
 }
 
-impl HeightTween {
-    /// The height for this frame, given the height the content takes.
-    pub(crate) fn resolve(self, content: f64) -> f64 {
-        let from = self.from.unwrap_or(content);
-        let to = self.to.unwrap_or(content);
-        // An easing that overshoots can carry a collapse below zero, and CSS has
-        // no negative `height`.
-        (from + (to - from) * self.progress).max(0.0)
-    }
+/// One step of a linear interpolation.
+fn mix(from: f64, to: f64, progress: f64) -> f64 {
+    from + (to - from) * progress
 }
 
 impl MotionStyle {
     fn interpolate(self, target: Self, progress: f64) -> Self {
         fn value(from: Option<f64>, to: Option<f64>, progress: f64) -> Option<f64> {
-            to.map(|to| from.unwrap_or(to) + (to - from.unwrap_or(to)) * progress)
+            to.map(|to| mix(from.unwrap_or(to), to, progress))
         }
-
-        // A keyword at either end leaves `height` alone. `MotionState::frame`
-        // hands that case to the renderer as a `HeightTween` instead.
-        let height = match (self.height, target.height) {
-            (from, Some(MotionHeight::Length(to))) => {
-                let from = from.and_then(MotionHeight::length).unwrap_or(to);
-                Some(MotionHeight::Length(from + (to - from) * progress))
-            }
-            _ => None,
-        };
 
         Self {
             width: value(self.width, target.width, progress),
-            height,
+            // `auto` interpolates the same way as a length, because both ends
+            // are pixels plus a share of the content.
+            height: target
+                .height
+                .map(|to| self.height.unwrap_or(to).mix(to, progress)),
             opacity: value(self.opacity, target.opacity, progress),
             top: value(self.top, target.top, progress),
             right: value(self.right, target.right, progress),
@@ -100,10 +132,12 @@ impl MotionStyle {
 
     pub(crate) fn apply_to(self, style: &mut StyleDesc) {
         if let Some(value) = self.width {
-            style.width = Some(DimensionValue::Pixels(value));
+            style.width = Some(value.into());
         }
-        if let Some(MotionHeight::Length(value)) = self.height {
-            style.height = Some(DimensionValue::Pixels(value));
+        // A height that still needs the content belongs to `AutoHeight`, which
+        // reads it from the frame rather than from the style.
+        if let Some(height) = self.height.and_then(MotionHeight::length) {
+            style.height = Some(height.into());
         }
         if let Some(value) = self.opacity {
             style.opacity = Some(value.into());
@@ -181,10 +215,15 @@ struct MotionDescription {
 #[derive(Clone, Copy, Debug)]
 pub(crate) struct MotionFrame {
     pub style: MotionStyle,
-    /// The `height` interpolation when `auto` is at one end of it, which
-    /// `style` cannot carry because it has no number yet.
-    pub height: Option<HeightTween>,
     pub active: bool,
+}
+
+impl MotionFrame {
+    /// The `height` for this frame when it still needs the height the content
+    /// takes. `AutoHeight` measures that, so the style sink leaves it alone.
+    pub(crate) fn measured_height(&self) -> Option<MotionHeight> {
+        self.style.height.filter(|height| height.needs_content())
+    }
 }
 
 pub(crate) struct MotionState {
@@ -274,16 +313,8 @@ impl MotionState {
         let active = self.from != self.target && raw < 1.0;
         let progress = ease(raw.clamp(0.0, 1.0), &self.transition.ease);
 
-        let keyword_at_either_end = matches!(self.target.height, Some(MotionHeight::Keyword(_)))
-            || matches!(self.from.height, Some(MotionHeight::Keyword(_)));
-
         MotionFrame {
             style: self.from.interpolate(self.target, progress),
-            height: (keyword_at_either_end && self.target.height.is_some()).then(|| HeightTween {
-                from: self.from.height.and_then(MotionHeight::length),
-                to: self.target.height.and_then(MotionHeight::length),
-                progress,
-            }),
             active,
         }
     }
@@ -309,7 +340,7 @@ fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, St
 fn validate_style(style: &MotionStyle) -> Result<(), String> {
     for (name, value) in [
         ("width", style.width),
-        ("height", style.height.and_then(MotionHeight::length)),
+        ("height", style.height.map(|height| height.pixels)),
         ("opacity", style.opacity),
         ("top", style.top),
         ("right", style.right),
@@ -322,10 +353,7 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
         }
     }
     if style.width.is_some_and(|value| value < 0.0)
-        || style
-            .height
-            .and_then(MotionHeight::length)
-            .is_some_and(|value| value < 0.0)
+        || style.height.is_some_and(|height| height.pixels < 0.0)
         || style.border_radius.is_some_and(|value| value < 0.0)
     {
         return Err("motion sizes and borderRadius must be non-negative".to_string());
@@ -470,6 +498,82 @@ mod tests {
         ] {
             assert!(MotionState::new(&description, now).is_err());
         }
+    }
+
+    /// The height the frame reports, given a content height of 200.
+    fn at(frame: MotionFrame) -> Option<f64> {
+        frame.style.height.map(|height| height.resolve(200.0))
+    }
+
+    #[test]
+    fn opens_toward_the_height_the_content_takes() {
+        let started = Instant::now();
+        let description = serde_json::json!({
+            "initial": { "height": 0.0 },
+            "animate": { "height": "auto" },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        let state = MotionState::new(&description, started).unwrap();
+
+        assert_eq!(at(state.frame(started)), Some(0.0));
+        assert_eq!(at(state.frame(started + Duration::from_millis(500))), Some(100.0));
+        assert_eq!(at(state.frame(started + Duration::from_secs(1))), Some(200.0));
+    }
+
+    #[test]
+    fn collapses_from_the_height_auto_reached() {
+        let started = Instant::now();
+        let opening = serde_json::json!({
+            "initial": { "height": 0.0 },
+            "animate": { "height": "auto" },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        let mut state = MotionState::new(&opening, started).unwrap();
+
+        let settled = started + Duration::from_secs(1);
+        let closing = serde_json::json!({
+            "initial": false,
+            "animate": { "height": 0.0 },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        state.sync(&closing, settled).unwrap();
+
+        assert_eq!(at(state.frame(settled)), Some(200.0));
+        assert_eq!(at(state.frame(settled + Duration::from_millis(500))), Some(100.0));
+        assert_eq!(at(state.frame(settled + Duration::from_secs(1))), Some(0.0));
+    }
+
+    #[test]
+    fn reverses_mid_open_without_a_jump() {
+        let started = Instant::now();
+        let opening = serde_json::json!({
+            "initial": { "height": 0.0 },
+            "animate": { "height": "auto" },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        let mut state = MotionState::new(&opening, started).unwrap();
+
+        let turned = started + Duration::from_millis(500);
+        let closing = serde_json::json!({
+            "initial": false,
+            "animate": { "height": 0.0 },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        state.sync(&closing, turned).unwrap();
+
+        // Half open when it turned, so the collapse starts at half.
+        assert_eq!(at(state.frame(turned)), Some(100.0));
+        assert_eq!(at(state.frame(turned + Duration::from_millis(500))), Some(50.0));
+    }
+
+    #[test]
+    fn rejects_a_height_keyword_it_cannot_measure() {
+        let now = Instant::now();
+        let description = serde_json::json!({
+            "animate": { "height": "min-content" },
+            "transition": {}
+        });
+        assert!(MotionState::new(&description, now).is_err());
     }
 
     #[test]

@@ -93,11 +93,11 @@ pub(super) fn build_element(
     let built = match element.element_type.as_str() {
         "div" => {
             ctx.custom_registry.destroy(id);
-            build_div(element, style, resolved, motion, ctx, window, cx)
+            build_div(element, style, resolved.clone(), motion, ctx, window, cx)
         }
         "text" => {
             ctx.custom_registry.destroy(id);
-            build_text(element, style, resolved, motion, ctx, window, cx)
+            build_text(element, style, resolved.clone(), motion, ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -145,26 +145,7 @@ pub(super) fn build_element(
         }
     };
 
-    // A `height` animating toward `auto` needs a number that only layout knows,
-    // so the element that owns it measures its content and wraps this one.
-    let built = match motion.and_then(|frame| frame.height) {
-        Some(tween) => {
-            // A declared pixel width goes on the wrapper so taffy resolves the
-            // box straight to it. Any other width reaches the measurement
-            // through taffy instead.
-            let width = motion
-                .and_then(|frame| frame.style.width)
-                .or_else(|| match style.and_then(|style| style.width.as_ref()) {
-                    Some(crate::style::DimensionValue::Pixels(value)) => Some(*value),
-                    _ => None,
-                })
-                .map(|value| gpui::px(value as f32));
-            gpui::IntoElement::into_any_element(super::auto_height::AutoHeight::new(
-                id, built, tween, width,
-            ))
-        }
-        None => built,
-    };
+    let built = super::auto_height::wrap(id, built, motion, resolved.as_deref());
 
     ctx.cascade = parent_cascade;
     built

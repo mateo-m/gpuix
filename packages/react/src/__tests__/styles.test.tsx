@@ -1867,6 +1867,61 @@ describeNative("motion", () => {
     renderer.clockResume()
   })
 
+  /// A box that opens from 0 to `auto` over one second, holding 100 pixels of
+  /// content, on a paused clock.
+  function openingToAuto() {
+    const { render, renderer } = createTestRoot()
+    const tree = (open: boolean) => (
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: open ? "auto" : 0 }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        <div style={{ width: 200, height: 100 }} />
+      </motion.div>
+    )
+    renderer.clockPause()
+    render(tree(true))
+    const id = renderer.findByType("div")[0]!.id
+    return {
+      open: () => render(tree(true)),
+      close: () => render(tree(false)),
+      after: (ms: number) => renderer.clockFastForward(ms),
+      height: () => renderer.getElementBounds(id)?.[3] ?? -1,
+      done: () => renderer.clockResume(),
+    }
+  }
+
+  it("collapses from the height auto reached", () => {
+    const box = openingToAuto()
+    box.after(2000)
+    expect(box.height()).toBeCloseTo(100, 0)
+
+    // Going back to a length used to lose the height `auto` had, so the box
+    // snapped shut on the first frame of the collapse.
+    box.close()
+    expect(box.height()).toBeCloseTo(100, 0)
+    box.after(500)
+    expect(box.height()).toBeCloseTo(50, 0)
+    box.after(500)
+    expect(box.height()).toBeCloseTo(0, 0)
+    box.done()
+  })
+
+  it("reverses part way open without jumping", () => {
+    const box = openingToAuto()
+    box.after(500)
+    expect(box.height()).toBeCloseTo(50, 0)
+
+    // Half way to `auto` is half the content, and the collapse starts there.
+    box.close()
+    expect(box.height()).toBeCloseTo(50, 0)
+    box.after(500)
+    expect(box.height()).toBeCloseTo(25, 0)
+    box.done()
+  })
+
   it("renders the normal element when an internal motion payload is invalid", () => {
     const { render, renderer } = createTestRoot()
 

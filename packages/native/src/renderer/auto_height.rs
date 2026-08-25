@@ -9,7 +9,44 @@ use gpui::{
     size,
 };
 
-use crate::motion::HeightTween;
+use crate::motion::{MotionFrame, MotionHeight};
+use crate::style::resolve::Resolved;
+
+/// `built` inside the element that measures it, when its `height` animates
+/// with `auto` at an end. Otherwise `built` as it was.
+///
+/// The inner element has to declare no height of its own for the measurement
+/// to see the content. `apply_motion` writes `auto` on it for that reason.
+///
+/// A pixel width goes on the wrapper so taffy resolves the box straight to it.
+/// Any other width reaches the measurement through taffy instead.
+pub(super) fn wrap(
+    id: u64,
+    built: AnyElement,
+    motion: Option<MotionFrame>,
+    resolved: Option<&Resolved>,
+) -> AnyElement {
+    let Some((frame, height)) = motion.and_then(|frame| Some((frame, frame.measured_height()?)))
+    else {
+        return built;
+    };
+    let width = frame
+        .style
+        .width
+        .map(|value| px(value as f32))
+        .or_else(|| absolute_pixels(resolved?.base.size.width));
+    AutoHeight::new(id, built, height, width).into_any_element()
+}
+
+/// The pixels a resolved length is, or `None` when it is a share or `auto`.
+fn absolute_pixels(length: Option<gpui::Length>) -> Option<Pixels> {
+    match length? {
+        gpui::Length::Definite(gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(
+            pixels,
+        ))) => Some(pixels),
+        _ => None,
+    }
+}
 
 /// The content, and the layout tree it measures in.
 ///
@@ -36,18 +73,18 @@ struct Content {
 /// The content keeps the height it measured, so the box clips while the animated
 /// height is shorter than it. That is the `overflow: hidden` the web asks for on
 /// a box whose height animates.
-pub(super) struct AutoHeight {
+struct AutoHeight {
     id: u64,
     content: Rc<RefCell<Content>>,
-    tween: HeightTween,
+    height: MotionHeight,
     width: Option<Pixels>,
 }
 
 impl AutoHeight {
-    pub(super) fn new(
+    fn new(
         id: u64,
         element: AnyElement,
-        tween: HeightTween,
+        height: MotionHeight,
         width: Option<Pixels>,
     ) -> Self {
         Self {
@@ -56,7 +93,7 @@ impl AutoHeight {
                 element,
                 layout: IsolatedLayout::new(),
             })),
-            tween,
+            height,
             width,
         }
     }
@@ -98,7 +135,7 @@ impl Element for AutoHeight {
         }
 
         let content = self.content.clone();
-        let tween = self.tween;
+        let height = self.height;
         let layout_id = window.request_measured_layout(
             style,
             move |known: Size<Option<Pixels>>, available: Size<AvailableSpace>, window, cx| {
@@ -117,7 +154,10 @@ impl Element for AutoHeight {
                         element.layout_as_root(size(width, AvailableSpace::MaxContent), window, cx)
                     });
 
-                size(measured.width, px(tween.resolve(f32::from(measured.height) as f64) as f32))
+                size(
+                    measured.width,
+                    px(height.resolve(f32::from(measured.height) as f64) as f32),
+                )
             },
         );
         (layout_id, ())
