@@ -8,8 +8,9 @@
     "test": "vitest run",
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
-    "compile": "bun compile-chat.ts",
-    "demo": "bun --hot demo.tsx"
+    "compile": "bun compile.ts chat.tsx --name \"GPUIX Chat\" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint \"#10a37f\"",
+    "demo": "bun --hot demo.tsx",
+    "compile:demo": "bun compile.ts demo.tsx --name \"GPUIX Demo\" --id dev.gpuix.demo"
   },
   "dependencies": {
     "@gpuix/react": "workspace:*",

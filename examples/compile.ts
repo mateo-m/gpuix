@@ -1,33 +1,58 @@
 /**
- * Compile the Waku-style chat example into a standalone Bun binary.
- * On macOS also wraps it in a .app so Finder and Dock can show a custom icon.
+ * Compile one example into a standalone Bun binary.
+ *
+ * The binary holds the script, the Bun runtime and the native `.node`, so it
+ * runs on a machine with nothing installed. On macOS it is wrapped in a `.app`
+ * so Finder and the Dock can show it.
+ *
+ *   bun compile.ts chat.tsx --name "GPUIX Chat" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint "#10a37f"
+ *   bun compile.ts demo.tsx --name "GPUIX Demo" --id dev.gpuix.demo
+ *
+ * The icon needs `rsvg-convert` (librsvg) and, on Windows, `magick`. When
+ * either is missing the icon is skipped and the app takes the system default.
  */
 import { spawnSync } from 'node:child_process'
 import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
+import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
 
 const ROOT = path.dirname(fileURLToPath(import.meta.url))
-const DIST = path.join(ROOT, 'dist')
-const SVG = path.join(ROOT, 'assets', 'icons', 'openai-mark.svg')
+
+const { values, positionals } = parseArgs({
+  allowPositionals: true,
+  options: {
+    name: { type: 'string' },
+    id: { type: 'string' },
+    icon: { type: 'string' },
+    tint: { type: 'string', default: '#10a37f' },
+  },
+})
+
+const entry = positionals[0]
+if (!entry || !values.name || !values.id) {
+  console.error('usage: bun compile.ts <entry.tsx> --name <app name> --id <bundle id> [--icon <svg>] [--tint <hex>]')
+  process.exit(2)
+}
+
+const ENTRY = path.resolve(ROOT, entry)
+const SLUG = path.basename(entry, path.extname(entry))
+const APP_NAME = values.name
+const BUNDLE_ID = values.id
+const DIST = path.join(ROOT, 'dist', SLUG)
 const PNG = path.join(DIST, 'app-icon.png')
 const ICO = path.join(DIST, 'app-icon.ico')
 const ICNS = path.join(DIST, 'app-icon.icns')
-const BINARY = path.join(DIST, process.platform === 'win32' ? 'chat.exe' : 'chat')
-const APP_NAME = 'GPUIX Chat'
+const BINARY = path.join(DIST, process.platform === 'win32' ? `${SLUG}.exe` : SLUG)
 const APP_BUNDLE = path.join(DIST, `${APP_NAME}.app`)
 
 function log(message: string): void {
-  console.log(`[compile-chat] ${message}`)
+  console.log(`[compile] ${message}`)
 }
 
-function run(command: string, args: string[], opts: { cwd?: string } = {}): void {
+function run(command: string, args: string[]): void {
   log(`run: ${command} ${args.join(' ')}`)
-  const result = spawnSync(command, args, {
-    cwd: opts.cwd,
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'pipe'],
-  })
+  const result = spawnSync(command, args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
   const stdout = result.stdout.trim()
   const stderr = result.stderr.trim()
   if (stdout && command !== 'sips') console.log(stdout)
@@ -37,32 +62,35 @@ function run(command: string, args: string[], opts: { cwd?: string } = {}): void
   }
 }
 
-async function buildIcons(): Promise<void> {
-  log(`building icons from ${path.relative(ROOT, SVG)}`)
-  const svg = (await Bun.file(SVG).text()).replace(
-    'fill="currentColor"',
-    'fill="#ffffff"',
-  )
+/// Whether the icon can be built here. Returns the reason when it cannot.
+function iconBlocker(): string | null {
+  if (!values.icon) return 'no --icon given'
+  if (!Bun.which('rsvg-convert')) return 'rsvg-convert is not installed'
+  if (process.platform === 'win32' && !Bun.which('magick')) return 'magick is not installed'
+  return null
+}
+
+async function buildIcons(): Promise<boolean> {
+  const blocker = iconBlocker()
+  if (blocker) {
+    log(`skipping the icon: ${blocker}`)
+    return false
+  }
+  const source = path.resolve(ROOT, values.icon!)
+  log(`building icons from ${path.relative(ROOT, source)}`)
+  const svg = (await Bun.file(source).text()).replace('fill="currentColor"', 'fill="#ffffff"')
   const whiteSvg = path.join(DIST, 'app-icon.svg')
   await Bun.write(whiteSvg, svg)
 
-  run('rsvg-convert', [
-    '-w',
-    '1024',
-    '-h',
-    '1024',
-    '--background-color',
-    '#10a37f',
-    whiteSvg,
-    '-o',
-    PNG,
-  ])
+  run('rsvg-convert', ['-w', '1024', '-h', '1024', '--background-color', values.tint!, whiteSvg, '-o', PNG])
   log(`wrote ${path.relative(ROOT, PNG)}`)
 
-  run('magick', [PNG, '-define', 'icon:auto-resize=256,128,64,48,32,16', ICO])
-  log(`wrote ${path.relative(ROOT, ICO)}`)
+  if (process.platform === 'win32') {
+    run('magick', [PNG, '-define', 'icon:auto-resize=256,128,64,48,32,16', ICO])
+    log(`wrote ${path.relative(ROOT, ICO)}`)
+  }
 
-  if (process.platform !== 'darwin') return
+  if (process.platform !== 'darwin') return true
 
   const iconset = path.join(DIST, 'app-icon.iconset')
   rmSync(iconset, { recursive: true, force: true })
@@ -84,39 +112,34 @@ async function buildIcons(): Promise<void> {
   }
   run('iconutil', ['-c', 'icns', iconset, '-o', ICNS])
   log(`wrote ${path.relative(ROOT, ICNS)}`)
+  return true
 }
 
-async function compileBinary(): Promise<void> {
-  log('bundling chat.tsx into a standalone binary')
+async function compileBinary(withIcon: boolean): Promise<void> {
+  log(`bundling ${path.relative(ROOT, ENTRY)} into a standalone binary`)
   const compile: {
     outfile: string
     windows?: {
-      icon: string
+      icon?: string
       hideConsole: boolean
       title: string
       publisher: string
       version: string
       description: string
     }
-  } = {
-    outfile: BINARY,
-  }
+  } = { outfile: BINARY }
   if (process.platform === 'win32') {
     compile.windows = {
-      icon: ICO,
+      icon: withIcon ? ICO : undefined,
       hideConsole: true,
       title: APP_NAME,
       publisher: 'GPUIX',
       version: '0.1.0',
-      description: 'Waku-style desktop app built with GPUIX',
+      description: `${APP_NAME}, a desktop app built with GPUIX`,
     }
   }
 
-  const result = await Bun.build({
-    entrypoints: [path.join(ROOT, 'chat.tsx')],
-    compile,
-    minify: true,
-  })
+  const result = await Bun.build({ entrypoints: [ENTRY], compile, minify: true })
   if (!result.success) {
     for (const message of result.logs) console.error(message)
     throw new Error('bun build --compile failed')
@@ -125,7 +148,7 @@ async function compileBinary(): Promise<void> {
   log(`wrote ${path.relative(ROOT, output)}`)
 }
 
-function wrapMacApp(): void {
+function wrapMacApp(withIcon: boolean): void {
   if (process.platform !== 'darwin') return
   log(`wrapping ${path.relative(ROOT, BINARY)} in ${path.basename(APP_BUNDLE)}`)
   rmSync(APP_BUNDLE, { recursive: true, force: true })
@@ -134,10 +157,10 @@ function wrapMacApp(): void {
   mkdirSync(macos, { recursive: true })
   mkdirSync(resources, { recursive: true })
 
-  const executable = path.join(macos, 'chat')
+  const executable = path.join(macos, SLUG)
   run('cp', [BINARY, executable])
   run('chmod', ['+x', executable])
-  run('cp', [ICNS, path.join(resources, 'AppIcon.icns')])
+  if (withIcon) run('cp', [ICNS, path.join(resources, 'AppIcon.icns')])
 
   const plist = [
     '<?xml version="1.0" encoding="UTF-8"?>',
@@ -149,11 +172,10 @@ function wrapMacApp(): void {
     '  <key>CFBundleDisplayName</key>',
     `  <string>${APP_NAME}</string>`,
     '  <key>CFBundleExecutable</key>',
-    '  <string>chat</string>',
-    '  <key>CFBundleIconFile</key>',
-    '  <string>AppIcon</string>',
+    `  <string>${SLUG}</string>`,
+    ...(withIcon ? ['  <key>CFBundleIconFile</key>', '  <string>AppIcon</string>'] : []),
     '  <key>CFBundleIdentifier</key>',
-    '  <string>dev.gpuix.chat</string>',
+    `  <string>${BUNDLE_ID}</string>`,
     '  <key>CFBundleInfoDictionaryVersion</key>',
     '  <string>6.0</string>',
     '  <key>CFBundleName</key>',
@@ -173,17 +195,23 @@ function wrapMacApp(): void {
     '',
   ].join('\n')
   writeFileSync(path.join(APP_BUNDLE, 'Contents', 'Info.plist'), plist)
+  // The binary Bun writes carries only the linker's ad hoc signature, which
+  // does not cover the payload Bun appends. LaunchServices kills it with
+  // "Code Signature Invalid" when the app opens from Finder, while a terminal
+  // lets it run. Signing again covers the whole file.
+  run('codesign', ['--force', '--sign', '-', executable])
+  run('codesign', ['--force', '--sign', '-', APP_BUNDLE])
   run('touch', [APP_BUNDLE])
   log(`wrote ${path.relative(ROOT, APP_BUNDLE)}`)
 }
 
 async function main(): Promise<void> {
-  log(`output dir ${path.relative(ROOT, DIST) || '.'}`)
+  log(`output dir ${path.relative(ROOT, DIST)}`)
   rmSync(DIST, { recursive: true, force: true })
   mkdirSync(DIST, { recursive: true })
-  await buildIcons()
-  await compileBinary()
-  wrapMacApp()
+  const withIcon = await buildIcons()
+  await compileBinary(withIcon)
+  wrapMacApp(withIcon)
   log('done')
   if (process.platform === 'darwin') {
     log(`run: open "${APP_BUNDLE}"`)
