@@ -130,6 +130,19 @@ describeNative("render()", () => {
     expect(renderer.getAllText()).toEqual(["after"])
   })
 
+  it("takes a class resolver", () => {
+    // Without this, a class channel meant building the root by hand, because
+    // render() had no way to pass one on.
+    render(<text className="brand">named</text>, {
+      renderer,
+      resolveClassName: (token) => (token === "brand" ? { color: "#ff0000" } : null),
+    })
+    renderer.flush()
+
+    const node = renderer.findByType("text")[0]
+    expect(node?.style).toMatchObject({ color: "#ff0000" })
+  })
+
   it("remounts under bun --hot without creating a new root", async () => {
     const file = join(srcDir, "__tests__", "hot-app.tmp.tsx")
     writeFileSync(file, hotAppSource("hello"))
