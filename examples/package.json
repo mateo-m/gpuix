@@ -8,7 +8,8 @@
     "test": "vitest run",
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
-    "compile": "bun compile-chat.ts"
+    "compile": "bun compile-chat.ts",
+    "demo": "bun --hot demo.tsx"
   },
   "dependencies": {
     "@gpuix/react": "workspace:*",
