@@ -35,6 +35,8 @@ export const flushSync = _r.flushSyncFromReconciler ?? _r.flushSync
 export interface Root {
   render: (node: ReactNode) => void
   unmount: () => void
+  /** The renderer this root draws on, which is what `render()` opened. */
+  renderer: NativeRenderer
 }
 
 const idAllocators = new WeakMap<NativeRenderer, ElementIdAllocator>()
@@ -108,5 +110,6 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
     },
 
     unmount: cleanup,
+    renderer,
   }
 }

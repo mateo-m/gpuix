@@ -2,7 +2,7 @@ import type { ReactNode } from "react"
 import { GpuixRenderer } from "@gpuix/native"
 import type { EventPayload, WindowOptions } from "@gpuix/native"
 import { createRoot, flushSync, type Root } from "./reconciler.js"
-import type { DebugFrameOverlayMode, NativeRenderer } from "../types/host.js"
+import type { DebugFrameOverlayMode, NativeRenderer, RootOptions } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import {
   InProcessBackend,
@@ -129,7 +129,7 @@ function renderSlot(): RenderSlot {
   return created
 }
 
-export interface RenderOptions extends WindowOptions {
+export interface RenderOptions extends WindowOptions, RootOptions {
   onEvent?: (event: EventPayload) => void
   renderer?: NativeRenderer
   /** GPUI scene overlay. Does not go through React or layout. */
@@ -145,7 +145,7 @@ export function resetRender(): void {
 
 /** Mount the app. Under `bun --hot`, later calls remount on the same native window. */
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
-  const { onEvent, renderer: injected, debugFrameOverlay, ...windowOptions } = options
+  const { onEvent, renderer: injected, debugFrameOverlay, resolveClassName, ...windowOptions } = options
   const slot = renderSlot()
   const remount = slot.root != null
   if (!slot.renderer) {
@@ -169,7 +169,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     console.log("[gpuix] remount: unmount previous tree")
     slot.root.unmount()
   }
-  const root = createRoot(host)
+  const root = createRoot(host, options)
   slot.root = root
   flushSync(() => {
     root.render(node)
