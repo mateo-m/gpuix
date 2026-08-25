@@ -4,8 +4,14 @@ import ReactReconciler from "react-reconciler"
 import type { OpaqueRoot } from "react-reconciler"
 import { ConcurrentRoot } from "react-reconciler/constants.js"
 import { GpuixContext } from "../hooks/use-gpuix.js"
-import type { Container, ElementIdAllocator, NativeRenderer } from "../types/host.js"
+import type {
+  Container,
+  ElementIdAllocator,
+  NativeRenderer,
+  RootOptions,
+} from "../types/host.js"
 import { wrapWithBatching } from "./batch-renderer.js"
+import { createClassNameCache } from "./class-names.js"
 import { attachRoot, detachRoot } from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
@@ -42,13 +48,17 @@ function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
   return alloc
 }
 
-export function createRoot(renderer: NativeRenderer): Root {
+export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
   const gpuixContainer: Container = {
     renderer: batchedRenderer,
     ids: idAllocatorFor(renderer),
     eventHandlers: new Map(),
+    classNames: options.resolveClassName
+      ? createClassNameCache(options.resolveClassName)
+      : null,
+    warnedAboutClassName: false,
   }
   attachRoot(renderer, gpuixContainer)
   attachRoot(batchedRenderer, gpuixContainer)

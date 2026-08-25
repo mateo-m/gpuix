@@ -141,6 +141,10 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
+      - name: Typecheck React package
+        run: bun run typecheck
+        working-directory: packages/react
+
       - name: Run React tests
         run: bun run test
         working-directory: packages/react

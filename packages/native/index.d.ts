@@ -141,6 +141,18 @@ export declare class TestGpuixRenderer {
    */
   commitMutations(): void
   /**
+   * How many styles the renderer has resolved since the last reset.
+   *
+   * The performance tests read this instead of measuring wall-clock time.
+   * GPUI rebuilds its element tree every frame, so the number that matters
+   * is how much of that rebuild repeats work the renderer already did. A
+   * frame that changes nothing must add nothing here. A wall-clock budget
+   * flakes on a loaded machine, and a flaky gate gets muted.
+   */
+  styleResolutions(): number
+  /** Set the style resolution counter back to zero. */
+  resetStyleResolutions(): void
+  /**
    * Apply a batch of mutations in a single FFI call.
    * Same format as GpuixRenderer::apply_batch (string op names).
    * Returns accumulated destroyed IDs from all destroyElement ops.

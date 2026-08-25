@@ -290,9 +290,7 @@ impl CustomElement for AnchoredElement {
         use gpui::prelude::*;
 
         let mut content = gpui::div().flex_col();
-        if let Some(style) = ctx.style {
-            content = crate::renderer::apply_styles(content, style);
-        }
+        content = ctx.styled(content);
         // Deferred overlays paint over the window blur. A missing fill lets the
         // page show through the card. Force an opaque surface when JS omitted one.
         let has_fill = ctx.style.is_some_and(|style| {

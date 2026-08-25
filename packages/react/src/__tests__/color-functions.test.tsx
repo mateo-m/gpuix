@@ -11,22 +11,25 @@ import {
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
+// Every case here is a colour some CSS specification defines. `hsv()`,
+// `hsva()`, `hwba()` and bare hex with no `#` used to sit in these lists.
+// No CSS specification defines any of them. They came from csscolorparser,
+// which GPUIX no longer uses.
 const absoluteCases = [
   ["hex4", "#f00f", "#ff0000"],
-  ["hex-no-hash", "ff0000ff", "#ff0000"],
   ["named", "rebeccapurple", "#663399"],
   ["rgb", "rgb(255 0 0)", "#ff0000"],
   ["rgba", "rgba(255, 0, 0, 1)", "#ff0000"],
   ["hsl", "hsl(0 100% 50%)", "#ff0000"],
   ["hsla", "hsla(0, 100%, 50%, 1)", "#ff0000"],
   ["hwb", "hwb(0 0% 0%)", "#ff0000"],
-  ["hwba", "hwba(0, 0%, 0%, 1)", "#ff0000"],
-  ["hsv", "hsv(0 100% 100%)", "#ff0000"],
-  ["hsva", "hsva(0, 100%, 100%, 1)", "#ff0000"],
   ["lab", "lab(100% 0 0)", "#ffffff"],
   ["lch", "lch(100% 0 0)", "#ffffff"],
   ["oklab", "oklab(0 0 0)", "#000000"],
   ["oklch", "oklch(0 0 0)", "#000000"],
+  // Both of these came back as invalid before the move to lightningcss.
+  ["color-mix", "color-mix(in srgb, #ff0000 100%, #0000ff 0%)", "#ff0000"],
+  ["light-dark", "light-dark(#ff0000, #ff0000)", "#ff0000"],
 ] as const
 
 const alphaCases = [
@@ -35,9 +38,6 @@ const alphaCases = [
   ["hsl", "hsl(0 0% 0% / 50%)"],
   ["hsla", "hsla(0, 0%, 0%, 0.5)"],
   ["hwb", "hwb(0 0% 100% / 50%)"],
-  ["hwba", "hwba(0, 0%, 100%, 0.5)"],
-  ["hsv", "hsv(0 0% 0% / 50%)"],
-  ["hsva", "hsva(0, 0%, 0%, 0.5)"],
   ["lab", "lab(0% 0 0 / 50%)"],
   ["lch", "lch(0% 0 0 / 50%)"],
   ["oklab", "oklab(0 0 0 / 50%)"],
@@ -48,7 +48,6 @@ const relativeCases = [
   ["rgb", "rgb(from #bad455 b r g / alpha)", "#55bad4"],
   ["hsl", "hsl(from #bad455 h s l / alpha)", "#bad455"],
   ["hwb", "hwb(from #bad455 h w b / alpha)", "#bad455"],
-  ["hsv", "hsv(from #bad455 h s v / alpha)", "#bad455"],
   ["lab", "lab(from #bad455 l a b / alpha)", "#bad455"],
   ["lch", "lch(from #bad455 l c h / alpha)", "#bad455"],
   ["oklab", "oklab(from #bad455 calc(l * 0.7) a b)", "#708500"],
@@ -109,6 +108,17 @@ describeNative("native color functions", () => {
     expectScreenshotsDiffer(validPath, unsetPath)
   })
 
+  it.each([
+    ["hex with no hash", "ff0000ff"],
+    ["hwba", "hwba(0, 0%, 0%, 1)"],
+    ["hsv", "hsv(0 100% 100%)"],
+    ["hsva", "hsva(0, 100%, 100%, 1)"],
+  ])("ignores %s, which no CSS specification defines", (_name, input) => {
+    const paintedPath = captureColor("color-nonstandard-actual", input)
+    const unsetPath = captureColor("color-nonstandard-unset")
+    expectScreenshotsEqual(paintedPath, unsetPath)
+  })
+
   it("uses the same parser for compound consumers and pseudo-states", () => {
     const basePath = path.join(SHOTS_DIR, "color-consumers-base.png")
     const hoverPath = path.join(SHOTS_DIR, "color-consumers-hover.png")
@@ -132,7 +142,7 @@ describeNative("native color functions", () => {
             spreadRadius: 4,
             color: "oklab(45% 0.1 0.05 / 45%)",
           },
-          hover: { backgroundColor: "hsv(210 80% 70%)" },
+          hover: { backgroundColor: "hwb(210 20% 30%)" },
           active: { backgroundColor: "lch(60% 80 40)" },
         }}
       >

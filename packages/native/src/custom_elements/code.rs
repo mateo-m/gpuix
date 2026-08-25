@@ -186,9 +186,7 @@ impl CustomElement for CodeElement {
         let mut block = block
             .id(SharedString::from(format!("__gpuix_code_{}", ctx.id)))
             .child(body);
-        if let Some(style) = ctx.style {
-            block = crate::renderer::apply_styles(block, style);
-        }
+        block = ctx.styled(block);
         block = wire_standard_events(block, &ctx);
         block.into_any_element()
     }

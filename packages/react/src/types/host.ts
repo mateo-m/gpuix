@@ -5,12 +5,12 @@ export type DimensionValue = number | string
 export interface MotionStyle {
   width?: number
   height?: number
-  opacity?: number
-  top?: number
-  right?: number
-  bottom?: number
-  left?: number
-  borderRadius?: number
+  opacity?: Numeric
+  top?: Numeric
+  right?: Numeric
+  bottom?: Numeric
+  left?: Numeric
+  borderRadius?: Numeric
 }
 
 export type MotionEase =
@@ -43,23 +43,33 @@ export interface BoxShadow {
   color: string
 }
 
+/**
+ * A style value that resolves to a number.
+ *
+ * A bare number is pixels, which is what the `style` prop has always taken.
+ * A string is there for `var()` and for writing the unit, so `8`, `"8px"` and
+ * `"var(--pad)"` all mean the same padding. Any other unit drops the
+ * declaration rather than paint the wrong size, so `"2rem"` does nothing.
+ */
+export type Numeric = number | string
+
 export interface StyleDesc {
   display?: string
   visibility?: string
   flexDirection?: string
   flexWrap?: string
-  flexGrow?: number
-  flexShrink?: number
-  flexBasis?: number
+  flexGrow?: Numeric
+  flexShrink?: Numeric
+  flexBasis?: Numeric
   alignItems?: string
   alignSelf?: string
   alignContent?: string
   justifyContent?: string
-  gap?: number
-  rowGap?: number
-  columnGap?: number
-  gridTemplateColumns?: number
-  gridTemplateRows?: number
+  gap?: Numeric
+  rowGap?: Numeric
+  columnGap?: Numeric
+  gridTemplateColumns?: Numeric
+  gridTemplateRows?: Numeric
   gridColumnMin?: "zero" | "min-content" | "max-content"
   gridRowMin?: "zero" | "min-content" | "max-content"
 
@@ -70,17 +80,17 @@ export interface StyleDesc {
   maxWidth?: DimensionValue
   maxHeight?: DimensionValue
 
-  padding?: number
-  paddingTop?: number
-  paddingRight?: number
-  paddingBottom?: number
-  paddingLeft?: number
+  padding?: Numeric
+  paddingTop?: Numeric
+  paddingRight?: Numeric
+  paddingBottom?: Numeric
+  paddingLeft?: Numeric
 
-  margin?: number
-  marginTop?: number
-  marginRight?: number
-  marginBottom?: number
-  marginLeft?: number
+  margin?: Numeric
+  marginTop?: Numeric
+  marginRight?: Numeric
+  marginBottom?: Numeric
+  marginLeft?: Numeric
 
   position?: string
   top?: number
@@ -93,27 +103,27 @@ export interface StyleDesc {
   color?: string
   opacity?: number
 
-  borderWidth?: number
-  borderTopWidth?: number
-  borderRightWidth?: number
-  borderBottomWidth?: number
-  borderLeftWidth?: number
+  borderWidth?: Numeric
+  borderTopWidth?: Numeric
+  borderRightWidth?: Numeric
+  borderBottomWidth?: Numeric
+  borderLeftWidth?: Numeric
   borderColor?: string
   borderRadius?: number
-  borderTopLeftRadius?: number
-  borderTopRightRadius?: number
-  borderBottomLeftRadius?: number
-  borderBottomRightRadius?: number
+  borderTopLeftRadius?: Numeric
+  borderTopRightRadius?: Numeric
+  borderBottomLeftRadius?: Numeric
+  borderBottomRightRadius?: Numeric
   boxShadow?: BoxShadow
 
-  fontSize?: number
+  fontSize?: Numeric
   fontFamily?: string
   fontWeight?: string | number
   textAlign?: string
-  lineHeight?: number
+  lineHeight?: Numeric
   whiteSpace?: "normal" | "nowrap"
   textOverflow?: "ellipsis" | "ellipsis-start"
-  lineClamp?: number
+  lineClamp?: Numeric
 
   overflow?: string
   overflowX?: string
@@ -129,11 +139,35 @@ export interface StyleDesc {
   /** Selection wash colour for this subtree. Defaults to the theme accent at 35%. */
   selectionColor?: string
 
-  // Pseudo-selector styles — applied by GPUI natively (no JS round-trip).
+  // Pseudo-selector styles, applied by GPUI natively (no JS round-trip).
   // Nesting is one level deep: hover/active cannot contain hover/active.
-  hover?: Omit<StyleDesc, "hover" | "active">
-  active?: Omit<StyleDesc, "hover" | "active">
+  //
+  // These two are the only conditions `style` carries, and they are here for
+  // history. A CSS `style` attribute holds declarations, not selectors. Any
+  // further condition belongs in a class, not here.
+  hover?: StyleDeclarations
+  active?: StyleDeclarations
+
+  // Custom properties. A declaration here is in scope for `var()` on this
+  // element and on everything below it, the same as in CSS.
+  //
+  // A number declares its own plain text, so `{ "--pad": 8 }` declares `8`.
+  // The name needs both dashes: `"-pad"` is a type error rather than a
+  // variable that silently never resolves.
+  [name: `--${string}`]: string | number | undefined
 }
+
+/**
+ * What `hover` and `active` may hold.
+ *
+ * No nesting, and no custom properties. A declaration inside a state has
+ * nothing to apply to, because the cascade reads variables from the element
+ * itself, not from one of its states.
+ */
+export type StyleDeclarations = Omit<
+  StyleDesc,
+  "hover" | "active" | `--${string}`
+>
 
 // Element types supported by GPUIX
 export type ElementType =
@@ -254,6 +288,14 @@ export interface GpuixTheme {
 // Use React refs to get an element's ID: ref.current.id
 export interface Props {
   style?: StyleDesc
+  /**
+   * Class tokens, separated by spaces, read by the root's resolver.
+   *
+   * `string | undefined` is the whole type, so `clsx` and `cn` need no special
+   * handling. Without a resolver on the root this does nothing and warns once.
+   * A declaration in `style` beats one from a class in every state.
+   */
+  className?: string
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
 
@@ -488,6 +530,38 @@ export interface Container {
   renderer: NativeRenderer
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
+  /** How this root reads `className`, or `null` when nothing registered one. */
+  classNames: ClassNameCache | null
+  /** Whether this root has already warned that it has no resolver. */
+  warnedAboutClassName: boolean
+}
+
+/**
+ * Reads one class token, such as `p-4`, into the style it declares.
+ *
+ * Returns `null` for a token it does not know. The token never holds a space,
+ * because the root splits the string before it calls this.
+ */
+export type ClassNameResolver = (token: string) => StyleDesc | null
+
+/** A resolver with what a root has already asked it. */
+export interface ClassNameCache {
+  resolve: ClassNameResolver
+  /** One entry per token, holding `null` for a token the resolver rejected. */
+  tokens: Map<string, StyleDesc | null>
+  /** Whole strings, bounded, least recently used out first. */
+  strings: Map<string, StyleDesc>
+}
+
+/** Options for a root. */
+export interface RootOptions {
+  /**
+   * How to read `className` on this root's elements.
+   *
+   * This is an option on the root rather than a global, so two roots can hold
+   * different resolvers and two test files can run at once.
+   */
+  resolveClassName?: ClassNameResolver
 }
 
 // Instance — minimal handle for React's reconciler.

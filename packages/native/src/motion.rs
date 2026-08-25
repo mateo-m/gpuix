@@ -45,22 +45,22 @@ impl MotionStyle {
             style.height = Some(DimensionValue::Pixels(value));
         }
         if let Some(value) = self.opacity {
-            style.opacity = Some(value);
+            style.opacity = Some(value.into());
         }
         if let Some(value) = self.top {
-            style.top = Some(value);
+            style.top = Some(value.into());
         }
         if let Some(value) = self.right {
-            style.right = Some(value);
+            style.right = Some(value.into());
         }
         if let Some(value) = self.bottom {
-            style.bottom = Some(value);
+            style.bottom = Some(value.into());
         }
         if let Some(value) = self.left {
-            style.left = Some(value);
+            style.left = Some(value.into());
         }
         if let Some(value) = self.border_radius {
-            style.border_radius = Some(value);
+            style.border_radius = Some(value.into());
         }
     }
 }

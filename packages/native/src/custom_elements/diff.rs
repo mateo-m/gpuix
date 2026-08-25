@@ -260,9 +260,7 @@ impl CustomElement for DiffElement {
                 .text_size(px(12.0))
                 .text_color(theme.text_faint)
                 .child(ctx.chrome_text("No changes", None));
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
+            empty = ctx.styled(empty);
             return empty.into_any_element();
         }
 
@@ -276,7 +274,7 @@ impl CustomElement for DiffElement {
         let wants_show_more = ctx.events.contains("showMore");
         let radius = ctx
             .style
-            .and_then(|style| style.border_radius)
+            .and_then(|style| ctx.cascade.scope().number(&style.border_radius))
             .unwrap_or(0.0) as f32;
         let row_theme = theme.clone();
 
@@ -375,9 +373,7 @@ impl CustomElement for DiffElement {
         }
 
         container = super::code::wire_standard_events(container, &ctx);
-        if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
-        }
+        container = ctx.styled(container);
         container.into_any_element()
     }
 

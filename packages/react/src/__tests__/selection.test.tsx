@@ -178,7 +178,7 @@ describe("text selection", () => {
     const a = createTestRoot()
     a.render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, width: 200 }}>
-        <text style={{ fontSize: 16, lineHeight: 18 }}>
+        <text style={{ fontSize: 16, lineHeight: "18px" }}>
           one two three four five six seven eight nine ten
         </text>
       </div>
@@ -190,7 +190,7 @@ describe("text selection", () => {
     const b = createTestRoot()
     b.render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, width: 200 }}>
-        <text style={{ fontSize: 16, lineHeight: 40 }}>
+        <text style={{ fontSize: 16, lineHeight: "40px" }}>
           one two three four five six seven eight nine ten
         </text>
       </div>

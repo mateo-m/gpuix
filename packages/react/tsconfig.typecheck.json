@@ -1,0 +1,11 @@
+{
+  // `tsc` never sees `src/__tests__`: the build config excludes it, and the
+  // test files there carry type errors that predate this config. `files`
+  // survives `exclude`, so this config adds back the one file whose whole
+  // purpose is to be typechecked.
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "noEmit": true },
+  "files": ["src/__tests__/style-types.check.ts"],
+  "include": ["src/**/*"],
+  "exclude": ["node_modules", "dist", "src/__tests__"]
+}

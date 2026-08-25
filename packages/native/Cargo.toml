@@ -9,12 +9,14 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+# CSS value reading, including `calc()`. Kept in its own crate so its tests run
+# without a GPU. See `css/`.
+gpuix-css = { path = "css" }
 napi = { version = "3", features = ["napi8", "serde-json"] }
 napi-derive = "3"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 anyhow = "1"
-csscolorparser = "0.8.3"
 log = "0.4"
 env_logger = "0.11"
 parking_lot = "0.12"
@@ -65,3 +67,9 @@ path = "examples/hello.rs"
 
 [profile.release]
 lto = true
+
+# The style parse benchmark. `harness = false` because it prints its own
+# numbers rather than running as a test.
+[[bench]]
+name = "style_parse"
+harness = false

@@ -1748,6 +1748,35 @@ describeNative("motion", () => {
     `)
   })
 
+  it("paints the animated width, not the declared one", () => {
+    const { render, renderer } = createTestRoot()
+
+    renderer.clockPause()
+    render(
+      <motion.div
+        initial={{ width: 40 }}
+        animate={{ width: 240 }}
+        transition={{ duration: 1 }}
+        style={{ height: 20, backgroundColor: "#ff0000" }}
+      />
+    )
+
+    const id = renderer.findByType("div")[0]!.id
+    const width = () => renderer.getElementBounds(id)?.[2] ?? 0
+
+    const start = width()
+    renderer.clockFastForward(500)
+    const middle = width()
+    renderer.clockFastForward(1000)
+    const end = width()
+    renderer.clockResume()
+
+    expect(start).toBeCloseTo(40, 0)
+    expect(middle).toBeGreaterThan(start)
+    expect(middle).toBeLessThan(240)
+    expect(end).toBeCloseTo(240, 0)
+  })
+
   it("renders the normal element when an internal motion payload is invalid", () => {
     const { render, renderer } = createTestRoot()
 

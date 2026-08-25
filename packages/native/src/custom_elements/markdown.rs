@@ -75,9 +75,7 @@ impl CustomElement for MarkdownElement {
         let tree = self.tree();
         if tree.is_empty() {
             let mut empty = gpui::div();
-            if let Some(style) = ctx.style {
-                empty = crate::renderer::apply_styles(empty, style);
-            }
+            empty = ctx.styled(empty);
             return empty.into_any_element();
         }
 
@@ -118,9 +116,7 @@ impl CustomElement for MarkdownElement {
             .child(body);
 
         container = super::code::wire_standard_events(container, &ctx);
-        if let Some(style) = ctx.style {
-            container = crate::renderer::apply_styles(container, style);
-        }
+        container = ctx.styled(container);
         container.into_any_element()
     }
 
