@@ -1777,6 +1777,69 @@ describeNative("motion", () => {
     expect(end).toBeCloseTo(240, 0)
   })
 
+  it("animates height to the height the content takes", () => {
+    const { render, renderer } = createTestRoot()
+
+    renderer.clockPause()
+    render(
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: "auto" }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        <div style={{ width: 200, height: 60 }} />
+        <div style={{ width: 200, height: 40 }} />
+      </motion.div>
+    )
+
+    const id = renderer.findByType("div")[0]!.id
+    const height = () => renderer.getElementBounds(id)?.[3] ?? -1
+
+    const start = height()
+    renderer.clockFastForward(500)
+    const middle = height()
+    renderer.clockFastForward(1000)
+    const end = height()
+    renderer.clockResume()
+
+    expect(start).toBeCloseTo(0, 0)
+    // Two children of 60 and 40 stack to 100, and nothing declares that number.
+    expect(end).toBeCloseTo(100, 0)
+    expect(middle).toBeCloseTo(50, 0)
+  })
+
+  it("follows content that grows while the animation runs", () => {
+    const { render, renderer } = createTestRoot()
+
+    const tree = (rows: number) => (
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: "auto" }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        {Array.from({ length: rows }, (_, row) => (
+          <div key={row} style={{ width: 200, height: 50 }} />
+        ))}
+      </motion.div>
+    )
+
+    renderer.clockPause()
+    render(tree(2))
+    const id = renderer.findByType("div")[0]!.id
+    const height = () => renderer.getElementBounds(id)?.[3] ?? -1
+
+    renderer.clockFastForward(2000)
+    expect(height()).toBeCloseTo(100, 0)
+
+    // A third row lands after the animation finished. `auto` is measured every
+    // frame, so the box grows with it rather than holding the old number.
+    render(tree(3))
+    expect(height()).toBeCloseTo(150, 0)
+    renderer.clockResume()
+  })
+
   it("renders the normal element when an internal motion payload is invalid", () => {
     const { render, renderer } = createTestRoot()
 

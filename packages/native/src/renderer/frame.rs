@@ -70,7 +70,7 @@ pub(super) fn build_element(
         state.is_valid().then(|| {
             let frame = state.frame(ctx.now);
             *ctx.motion_active |= frame.active;
-            frame.style
+            frame
         })
     } else {
         ctx.motion_states.remove(&id);
@@ -109,9 +109,9 @@ pub(super) fn build_element(
             // Custom renderers take a `StyleDesc` and resolve it themselves, so
             // a motion frame reaches them folded into one. They are the only
             // callers that still pay for that fold.
-            let animated = motion.map(|motion| {
+            let animated = motion.map(|frame| {
                 let mut declared = element.style.clone().unwrap_or_default();
-                motion.apply_to(&mut declared);
+                frame.style.apply_to(&mut declared);
                 declared
             });
             let style = animated.as_deref().or(style);
@@ -143,6 +143,26 @@ pub(super) fn build_element(
                 cx,
             )
         }
+    };
+
+    // A `height` animating toward `auto` needs a number that only layout knows,
+    // so the element that owns it measures its content and wraps this one.
+    let built = match motion.and_then(|frame| frame.height) {
+        Some(tween) => {
+            // The measurement runs before the wrapper knows its own width, so a
+            // declared width is what makes it exact.
+            let width = motion
+                .and_then(|frame| frame.style.width)
+                .or_else(|| match style.and_then(|style| style.width.as_ref()) {
+                    Some(crate::style::DimensionValue::Pixels(value)) => Some(*value),
+                    _ => None,
+                })
+                .map(|value| gpui::px(value as f32));
+            gpui::IntoElement::into_any_element(super::auto_height::AutoHeight::new(
+                id, built, tween, width,
+            ))
+        }
+        None => built,
     };
 
     ctx.cascade = parent_cascade;
@@ -289,7 +309,7 @@ pub(crate) fn build_div(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
-    motion: Option<crate::motion::MotionStyle>,
+    motion: Option<crate::motion::MotionFrame>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -651,7 +671,7 @@ pub(crate) fn build_text(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
-    motion: Option<crate::motion::MotionStyle>,
+    motion: Option<crate::motion::MotionFrame>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,

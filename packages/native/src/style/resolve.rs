@@ -140,13 +140,19 @@ pub(crate) fn apply_resolved<E: gpui::Styled>(mut el: E, resolved: &StyleRefinem
 /// value.
 pub(crate) fn apply_motion<E: gpui::Styled>(
     mut el: E,
-    motion: crate::motion::MotionStyle,
+    frame: crate::motion::MotionFrame,
     declared: Option<&StyleDesc>,
 ) -> E {
+    let motion = frame.style;
     if let Some(width) = motion.width {
         el = el.w(gpui::px(width as f32));
     }
-    if let Some(height) = motion.height {
+    // A `height` animated toward `auto` has no number yet. `AutoHeight` owns
+    // that case, and it measures this element to find the number, so this
+    // element must not declare a height of its own.
+    if frame.height.is_some() {
+        el.style().size.height = Some(gpui::Length::Auto);
+    } else if let Some(crate::motion::MotionHeight::Length(height)) = motion.height {
         el = el.h(gpui::px(height as f32));
     }
     if let Some(top) = motion.top {

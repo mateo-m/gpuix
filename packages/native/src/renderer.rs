@@ -40,6 +40,7 @@ use crate::theme::Theme;
 
 gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
 
+mod auto_height;
 mod batch;
 mod frame;
 mod virtual_list;
