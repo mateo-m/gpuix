@@ -77,6 +77,37 @@ impl<'a> Scope<'a> {
         }
     }
 
+    /// The size a sizing property means, or `None` when it means none.
+    ///
+    /// `width` and its family take `auto`, and a percentage on them resolves
+    /// against the parent rather than dropping, so they read through here
+    /// rather than through `number`.
+    pub fn dimension(
+        &self,
+        value: &Option<crate::style::Numeric>,
+    ) -> Option<crate::style::DimensionValue> {
+        use crate::style::DimensionValue;
+
+        let length = match value.as_ref()? {
+            crate::style::Numeric::Number(number) => Length::Number(*number as f32),
+            crate::style::Numeric::Text(text) => {
+                let text = self.value(text)?;
+                // `auto` is a keyword rather than a length, so the length
+                // parser never sees it.
+                if text.trim().eq_ignore_ascii_case("auto") {
+                    return Some(DimensionValue::Auto);
+                }
+                gpuix_css::length::length(&text, self.rem_size)?
+            }
+        };
+        Some(match length {
+            Length::Number(number) | Length::Pixels(number) => {
+                DimensionValue::Pixels(number as f64)
+            }
+            Length::Fraction(fraction) => DimensionValue::Percentage(fraction as f64),
+        })
+    }
+
     /// The pixels a declaration means.
     ///
     /// This is what most properties want. A bare number is pixels, which is how
@@ -461,6 +492,53 @@ mod tests {
         assert_eq!(scope.length(&text("1.5")), Some(Length::Number(1.5)));
         assert_eq!(scope.length(&text("150%")), Some(Length::Fraction(1.5)));
         assert_eq!(scope.length(&text("8px")), Some(Length::Pixels(8.0)));
+    }
+
+    fn dimension(
+        value: Option<crate::style::Numeric>,
+        pairs: &[(&str, &str)],
+    ) -> Option<crate::style::DimensionValue> {
+        let variables = scope_of(pairs);
+        Scope::new(&variables, Rgba::BLACK, false, 16.0).dimension(&value)
+    }
+
+    #[test]
+    fn a_size_reads_every_length_the_other_properties_read() {
+        use crate::style::{DimensionValue, Numeric};
+        let text = |t: &str| Some(Numeric::Text(t.to_string()));
+
+        assert_eq!(dimension(Some(Numeric::Number(200.0)), &[]), Some(DimensionValue::Pixels(200.0)));
+        assert_eq!(dimension(text("200px"), &[]), Some(DimensionValue::Pixels(200.0)));
+        assert_eq!(dimension(text("6rem"), &[]), Some(DimensionValue::Pixels(96.0)));
+        assert_eq!(dimension(text("calc(100px + 2rem)"), &[]), Some(DimensionValue::Pixels(132.0)));
+        assert_eq!(
+            dimension(text("calc(var(--spacing) * 30)"), &[("--spacing", "4px")]),
+            Some(DimensionValue::Pixels(120.0))
+        );
+    }
+
+    #[test]
+    fn a_size_also_takes_a_share_and_auto() {
+        use crate::style::{DimensionValue, Numeric};
+        let text = |t: &str| Some(Numeric::Text(t.to_string()));
+
+        assert_eq!(dimension(text("50%"), &[]), Some(DimensionValue::Percentage(0.5)));
+        assert_eq!(dimension(text("auto"), &[]), Some(DimensionValue::Auto));
+        assert_eq!(dimension(text("AUTO"), &[]), Some(DimensionValue::Auto));
+        assert_eq!(dimension(text("var(--w)"), &[("--w", "auto")]), Some(DimensionValue::Auto));
+    }
+
+    #[test]
+    fn a_size_it_cannot_read_drops_the_declaration() {
+        use crate::style::Numeric;
+        let text = |t: &str| Some(Numeric::Text(t.to_string()));
+
+        // None of these throws. The declaration drops and the element keeps
+        // what it had, which is what CSS does with a value it cannot parse.
+        assert_eq!(dimension(text("banana"), &[]), None);
+        assert_eq!(dimension(text("3em"), &[]), None);
+        assert_eq!(dimension(text("12vw"), &[]), None);
+        assert_eq!(dimension(text("var(--missing)"), &[]), None);
     }
 
     #[test]

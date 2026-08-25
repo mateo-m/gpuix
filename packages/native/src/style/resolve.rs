@@ -147,13 +147,13 @@ pub(crate) fn apply_motion<E: gpui::Styled>(
     if let Some(width) = motion.width {
         el = el.w(gpui::px(width as f32));
     }
-    // A `height` animated toward `auto` has no number yet. `AutoHeight` owns
-    // that case, and it measures this element to find the number, so this
-    // element must not declare a height of its own.
-    if frame.height.is_some() {
-        el.style().size.height = Some(gpui::Length::Auto);
-    } else if let Some(crate::motion::MotionHeight::Length(height)) = motion.height {
-        el = el.h(gpui::px(height as f32));
+    match motion.height.map(crate::motion::MotionHeight::length) {
+        Some(Some(height)) => el = el.h(gpui::px(height as f32)),
+        // A height that still needs the content has no number yet.
+        // `auto_height::wrap` measures this element to find one, so this
+        // element must not declare a height of its own.
+        Some(None) => el.style().size.height = Some(gpui::Length::Auto),
+        None => {}
     }
     if let Some(top) = motion.top {
         el = el.top(gpui::px(top as f32));
@@ -193,21 +193,37 @@ pub(crate) fn apply_motion<E: gpui::Styled>(
 
 // ── Style application ────────────────────────────────────────────────
 
-pub(crate) fn apply_width<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
-    match dim {
-        crate::style::DimensionValue::Pixels(v) => el.w(gpui::px(*v as f32)),
-        crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.w_full(),
-        crate::style::DimensionValue::Percentage(v) => el.w(gpui::relative(*v as f32)),
-        crate::style::DimensionValue::Auto => el,
+/// The six sizing properties, each read the same way and each landing in its
+/// own slot. `Auto` is what all six already default to, so writing it changes
+/// nothing.
+fn apply_sizes<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope: &Scope) -> E {
+    let sizes = el.style();
+    for (declared, slot) in [
+        (&style.width, &mut sizes.size.width),
+        (&style.height, &mut sizes.size.height),
+        (&style.min_width, &mut sizes.min_size.width),
+        (&style.min_height, &mut sizes.min_size.height),
+        (&style.max_width, &mut sizes.max_size.width),
+        (&style.max_height, &mut sizes.max_size.height),
+    ] {
+        if let Some(value) = scope.dimension(declared) {
+            *slot = Some(dimension(value));
+        }
     }
+    el
 }
 
-pub(crate) fn apply_height<E: gpui::Styled>(el: E, dim: &crate::style::DimensionValue) -> E {
-    match dim {
-        crate::style::DimensionValue::Pixels(v) => el.h(gpui::px(*v as f32)),
-        crate::style::DimensionValue::Percentage(v) if *v >= 0.999 => el.h_full(),
-        crate::style::DimensionValue::Percentage(v) => el.h(gpui::relative(*v as f32)),
-        crate::style::DimensionValue::Auto => el,
+/// The GPUI length a resolved sizing value means.
+fn dimension(value: crate::style::DimensionValue) -> gpui::Length {
+    match value {
+        crate::style::DimensionValue::Pixels(pixels) => gpui::px(pixels as f32).into(),
+        // A hair under the whole is a rounded 100%, and a whole is what
+        // `w_full` writes.
+        crate::style::DimensionValue::Percentage(share) if share >= 0.999 => {
+            gpui::relative(1.0).into()
+        }
+        crate::style::DimensionValue::Percentage(share) => gpui::relative(share as f32).into(),
+        crate::style::DimensionValue::Auto => gpui::Length::Auto,
     }
 }
 
@@ -316,40 +332,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
     if let Some(gap) = scope.number(&style.column_gap) {
         el = el.gap_x(gpui::px(gap as f32));
     }
-    if let Some(ref w) = style.width {
-        el = apply_width(el, w);
-    }
-    if let Some(ref h) = style.height {
-        el = apply_height(el, h);
-    }
-    if let Some(ref min_w) = style.min_width {
-        match min_w {
-            crate::style::DimensionValue::Pixels(v) => el = el.min_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.min_w(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
-    }
-    if let Some(ref min_h) = style.min_height {
-        match min_h {
-            crate::style::DimensionValue::Pixels(v) => el = el.min_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.min_h(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
-    }
-    if let Some(ref max_w) = style.max_width {
-        match max_w {
-            crate::style::DimensionValue::Pixels(v) => el = el.max_w(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.max_w(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
-    }
-    if let Some(ref max_h) = style.max_height {
-        match max_h {
-            crate::style::DimensionValue::Pixels(v) => el = el.max_h(gpui::px(*v as f32)),
-            crate::style::DimensionValue::Percentage(v) => el = el.max_h(gpui::relative(*v as f32)),
-            crate::style::DimensionValue::Auto => {}
-        }
-    }
+    el = apply_sizes(el, style, scope);
     if let Some(p) = scope.number(&style.padding) {
         el = el.p(gpui::px(p as f32));
     }
