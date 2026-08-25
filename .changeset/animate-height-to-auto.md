@@ -10,6 +10,6 @@ the height the content takes, and only layout knows that number, so the element
 measures its content every frame and interpolates against the measurement. An
 animation that opens a panel follows content that changes while it runs.
 
-The measurement happens before the element knows its own width, so declare a
-pixel `width` to make it exact. Without one the content measures unwrapped,
-which reads short for text that would have wrapped.
+The measurement runs at the width the element really gets, whether that width
+comes from a declared length, from `flex`, from a percentage or from a stretched
+cross axis. Text wraps the way it will on screen.

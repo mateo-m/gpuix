@@ -1809,6 +1809,33 @@ describeNative("motion", () => {
     expect(middle).toBeCloseTo(50, 0)
   })
 
+  it("measures the content at the width the parent gives it", () => {
+    const { render, renderer } = createTestRoot()
+    renderer.clockPause()
+    render(
+      <div style={{ width: 200, display: "flex", flexDirection: "column" }}>
+        <motion.div
+          initial={{ height: 0 }}
+          animate={{ height: "auto" }}
+          transition={{ duration: 1, ease: "linear" }}
+          style={{ display: "flex", flexDirection: "row", flexWrap: "wrap" }}
+        >
+          <div style={{ width: 120, height: 30 }} />
+          <div style={{ width: 120, height: 30 }} />
+        </motion.div>
+      </div>
+    )
+    const id = renderer.findByType("div")[1]!.id
+    renderer.clockFastForward(2000)
+    const end = renderer.getElementBounds(id)?.[3] ?? -1
+    renderer.clockResume()
+    // Nothing declares a width here. The width is the 200 the parent stretches
+    // the box to, and taffy hands that number to the measurement. Two children
+    // of 120 wrap into two rows of 30. Measured at max-content instead they
+    // would sit on one row and the box would stop at 30.
+    expect(end).toBeCloseTo(60, 0)
+  })
+
   it("follows content that grows while the animation runs", () => {
     const { render, renderer } = createTestRoot()
 

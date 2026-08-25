@@ -1,25 +1,44 @@
 //! Animating a `height` toward the height the content takes.
 
+use std::cell::RefCell;
+use std::rc::Rc;
+
 use gpui::{
     AnyElement, App, AvailableSpace, Bounds, ContentMask, Element, ElementId, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, Pixels, Style, Window, px, size,
+    InspectorElementId, IntoElement, IsolatedLayout, LayoutId, Pixels, Size, Style, Window, px,
+    size,
 };
 
 use crate::motion::HeightTween;
 
+/// The content, and the layout tree it measures in.
+///
+/// The measure closure and the element phases both reach this, so it is shared.
+struct Content {
+    element: AnyElement,
+    /// The content is laid out here rather than in the window's tree, because
+    /// the measurement runs while the window's tree computes.
+    layout: IsolatedLayout,
+}
+
 /// One element whose `height` animates with `auto` at an end of it.
 ///
 /// `auto` is the height the content takes, and only layout knows that number.
-/// GPUI lets an element lay a child out as a detached root while it requests
-/// its own layout, so this measures the content there, resolves the tween
-/// against the measurement, and asks for that height.
+/// This asks taffy for a measured box, and taffy calls back with the width the
+/// parent gives it. The content is measured at that width, the interpolation
+/// resolves against the measurement, and the measured box reports the result as
+/// its height.
 ///
-/// The measurement runs before this element knows its own width. A declared
-/// width is what makes it exact. Without one the content measures unwrapped,
-/// which reads short for text that would have wrapped.
+/// Taking the width from taffy is what makes this exact for a width that comes
+/// from `flex`, from a percentage, or from a stretched cross axis. Text wraps at
+/// the width it will really have.
+///
+/// The content keeps the height it measured, so the box clips while the animated
+/// height is shorter than it. That is the `overflow: hidden` the web asks for on
+/// a box whose height animates.
 pub(super) struct AutoHeight {
     id: u64,
-    child: AnyElement,
+    content: Rc<RefCell<Content>>,
     tween: HeightTween,
     width: Option<Pixels>,
 }
@@ -27,16 +46,30 @@ pub(super) struct AutoHeight {
 impl AutoHeight {
     pub(super) fn new(
         id: u64,
-        child: AnyElement,
+        element: AnyElement,
         tween: HeightTween,
         width: Option<Pixels>,
     ) -> Self {
         Self {
             id,
-            child,
+            content: Rc::new(RefCell::new(Content {
+                element,
+                layout: IsolatedLayout::new(),
+            })),
             tween,
             width,
         }
+    }
+
+    /// Run `f` with the content and the tree it lives in.
+    fn with_content<R>(
+        &self,
+        window: &mut Window,
+        f: impl FnOnce(&mut AnyElement, &mut Window) -> R,
+    ) -> R {
+        let content = &mut *self.content.borrow_mut();
+        let element = &mut content.element;
+        content.layout.enter(window, |window| f(element, window))
     }
 }
 
@@ -57,22 +90,37 @@ impl Element for AutoHeight {
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
         window: &mut Window,
-        cx: &mut App,
+        _cx: &mut App,
     ) -> (LayoutId, ()) {
-        let available = size(
-            self.width
-                .map_or(AvailableSpace::MaxContent, AvailableSpace::Definite),
-            AvailableSpace::MaxContent,
-        );
-        let content = self.child.layout_as_root(available, window, cx);
-        let height = self.tween.resolve(f64::from(f32::from(content.height)));
-
         let mut style = Style::default();
-        style.size.height = px(height as f32).into();
         if let Some(width) = self.width {
             style.size.width = width.into();
         }
-        (window.request_layout(style, [], cx), ())
+
+        let content = self.content.clone();
+        let tween = self.tween;
+        let layout_id = window.request_measured_layout(
+            style,
+            move |known: Size<Option<Pixels>>, available: Size<AvailableSpace>, window, cx| {
+                // Taffy asks more than once, with a known width on the pass that
+                // has resolved one. That pass is the answer that counts, and the
+                // earlier ones are the intrinsic widths this box reports.
+                let width = known
+                    .width
+                    .map_or(available.width, AvailableSpace::Definite);
+
+                let content = &mut *content.borrow_mut();
+                let element = &mut content.element;
+                let measured = content
+                    .layout
+                    .enter(window, |window| {
+                        element.layout_as_root(size(width, AvailableSpace::MaxContent), window, cx)
+                    });
+
+                size(measured.width, px(tween.resolve(f32::from(measured.height) as f64) as f32))
+            },
+        );
+        (layout_id, ())
     }
 
     fn prepaint(
@@ -84,20 +132,18 @@ impl Element for AutoHeight {
         window: &mut Window,
         cx: &mut App,
     ) {
-        // The content keeps the height it measured, so the box clips while the
-        // animated height is shorter than it. Taffy's `overflow` decides
-        // layout, not painting, which is why this is a mask rather than a
-        // style.
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            self.child.layout_as_root(
-                size(
-                    AvailableSpace::Definite(bounds.size.width),
-                    AvailableSpace::MaxContent,
-                ),
-                window,
-                cx,
-            );
-            self.child.prepaint_at(bounds.origin, window, cx);
+        self.with_content(window, |element, window| {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                element.layout_as_root(
+                    size(
+                        AvailableSpace::Definite(bounds.size.width),
+                        AvailableSpace::MaxContent,
+                    ),
+                    window,
+                    cx,
+                );
+                element.prepaint_at(bounds.origin, window, cx);
+            });
         });
     }
 
@@ -111,10 +157,12 @@ impl Element for AutoHeight {
         window: &mut Window,
         cx: &mut App,
     ) {
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
-            self.child.paint(window, cx);
+        self.with_content(window, |element, window| {
+            window.with_content_mask(Some(ContentMask { bounds }), |window| {
+                element.paint(window, cx);
+            });
         });
-        // The child painted its own tracker at the height it measured. The box
+        // The content painted its own tracker at the height it measured. The box
         // on screen is this one, so it records last and wins.
         crate::automation::record_bounds(self.id, bounds);
     }

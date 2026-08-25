@@ -64,7 +64,9 @@ impl HeightTween {
     pub(crate) fn resolve(self, content: f64) -> f64 {
         let from = self.from.unwrap_or(content);
         let to = self.to.unwrap_or(content);
-        from + (to - from) * self.progress
+        // An easing that overshoots can carry a collapse below zero, and CSS has
+        // no negative `height`.
+        (from + (to - from) * self.progress).max(0.0)
     }
 }
 

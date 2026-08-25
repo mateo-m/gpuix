@@ -149,8 +149,9 @@ pub(super) fn build_element(
     // so the element that owns it measures its content and wraps this one.
     let built = match motion.and_then(|frame| frame.height) {
         Some(tween) => {
-            // The measurement runs before the wrapper knows its own width, so a
-            // declared width is what makes it exact.
+            // A declared pixel width goes on the wrapper so taffy resolves the
+            // box straight to it. Any other width reaches the measurement
+            // through taffy instead.
             let width = motion
                 .and_then(|frame| frame.style.width)
                 .or_else(|| match style.and_then(|style| style.width.as_ref()) {
