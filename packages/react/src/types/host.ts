@@ -1,5 +1,16 @@
 import type { EventPayload } from "@gpuix/native"
 
+/**
+ * A value `width`, `height` and the four min and max forms take.
+ *
+ * A bare number is pixels. A string is read by the same length parser every
+ * other length property uses, so `"6rem"`, `"1in"`, `"calc(100px + 2rem)"` and
+ * `"var(--size)"` all work. On top of those it takes a percentage of the
+ * parent, such as `"50%"`, and `"auto"` for the size the content takes.
+ *
+ * A value the parser cannot read drops the one declaration and leaves the rest
+ * of the style alone, the way a browser drops a declaration it cannot parse.
+ */
 export type DimensionValue = number | string
 
 export interface MotionStyle {

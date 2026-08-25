@@ -144,82 +144,18 @@ pub struct BoxShadowValue {
     pub color: String,
 }
 
-/// A dimension value that can be a number (pixels) or a string (percentage, auto, etc.)
-#[derive(Debug, Clone, PartialEq, Serialize)]
-#[serde(untagged)]
+/// What a sizing property resolves to.
+///
+/// `width` and its family take `auto` and resolve a percentage against the
+/// parent, which the other length properties do not, so they have their own
+/// resolved type. `Scope::dimension` is the only thing that builds one.
+#[derive(Debug, Clone, Copy, Default, PartialEq)]
 pub enum DimensionValue {
     Pixels(f64),
-    Percentage(f64), // 0.0 to 1.0
+    /// A share of the parent, where `1.0` is the whole of it.
+    Percentage(f64),
+    #[default]
     Auto,
-}
-
-impl Default for DimensionValue {
-    fn default() -> Self {
-        DimensionValue::Auto
-    }
-}
-
-impl<'de> Deserialize<'de> for DimensionValue {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        use serde::de::{self, Visitor};
-
-        struct DimensionVisitor;
-
-        impl<'de> Visitor<'de> for DimensionVisitor {
-            type Value = DimensionValue;
-
-            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
-                formatter.write_str("a number or a string like '100%' or 'auto'")
-            }
-
-            fn visit_f64<E>(self, v: f64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(DimensionValue::Pixels(v))
-            }
-
-            fn visit_i64<E>(self, v: i64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(DimensionValue::Pixels(v as f64))
-            }
-
-            fn visit_u64<E>(self, v: u64) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                Ok(DimensionValue::Pixels(v as f64))
-            }
-
-            fn visit_str<E>(self, v: &str) -> Result<Self::Value, E>
-            where
-                E: de::Error,
-            {
-                if v == "auto" {
-                    Ok(DimensionValue::Auto)
-                } else if v.ends_with('%') {
-                    let num_str = v.trim_end_matches('%');
-                    match num_str.parse::<f64>() {
-                        Ok(n) => Ok(DimensionValue::Percentage(n / 100.0)),
-                        Err(_) => Err(de::Error::custom(format!("invalid percentage: {}", v))),
-                    }
-                } else {
-                    // Try to parse as a number
-                    match v.parse::<f64>() {
-                        Ok(n) => Ok(DimensionValue::Pixels(n)),
-                        Err(_) => Err(de::Error::custom(format!("invalid dimension: {}", v))),
-                    }
-                }
-            }
-        }
-
-        deserializer.deserialize_any(DimensionVisitor)
-    }
 }
 
 /// Declares `StyleDesc` and its `Deserialize` from one field list.
@@ -430,13 +366,14 @@ style_desc! {
     grid_column_min: Option<String> = "gridColumnMin",
     grid_row_min: Option<String> = "gridRowMin",
 
-    // Sizing - now supports both numbers and strings like "100%" or "auto"
-    width: Option<DimensionValue> = "width",
-    height: Option<DimensionValue> = "height",
-    min_width: Option<DimensionValue> = "minWidth",
-    min_height: Option<DimensionValue> = "minHeight",
-    max_width: Option<DimensionValue> = "maxWidth",
-    max_height: Option<DimensionValue> = "maxHeight",
+    // Sizing. These read the same CSS lengths as every other length property,
+    // and `auto` and a percentage on top of them.
+    width: Option<Numeric> = "width",
+    height: Option<Numeric> = "height",
+    min_width: Option<Numeric> = "minWidth",
+    min_height: Option<Numeric> = "minHeight",
+    max_width: Option<Numeric> = "maxWidth",
+    max_height: Option<Numeric> = "maxHeight",
 
     // Spacing (padding)
     padding: Option<Numeric> = "padding",
@@ -618,8 +555,8 @@ mod tests {
         .unwrap();
         assert_eq!(style.padding_top, Some(Numeric::Number(8.0)));
         assert_eq!(style.gap, Some(Numeric::Text("var(--gap)".to_owned())));
-        assert_eq!(style.width, Some(DimensionValue::Percentage(1.0)));
-        assert_eq!(style.height, Some(DimensionValue::Auto));
+        assert_eq!(style.width, Some(Numeric::Text("100%".to_owned())));
+        assert_eq!(style.height, Some(Numeric::Text("auto".to_owned())));
         assert_eq!(style.font_weight, Some(FontWeightValue::Str("bold".to_owned())));
         assert_eq!(style.line_clamp, None);
         assert_eq!(style.hover.unwrap().color.as_deref(), Some("red"));
@@ -668,7 +605,7 @@ mod tests {
         let style = StyleDesc {
             gap: Some(Numeric::Text("calc(1rem + 2px)".to_owned())),
             font_size: Some(Numeric::Number(14.0)),
-            max_width: Some(DimensionValue::Pixels(320.0)),
+            max_width: Some(Numeric::Number(320.0)),
             user_select: Some("none".to_owned()),
             custom: [("--pad".to_owned(), serde_json::json!("8px"))].into_iter().collect(),
             hover: Some(Box::new(StyleDesc {
