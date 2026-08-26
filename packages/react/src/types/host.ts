@@ -278,6 +278,11 @@ export interface StyleDesc {
   overflow?: string
   overflowX?: string
   overflowY?: string
+  /** `"contain"` and `"none"` stop the wheel from reaching the parent
+   *  scroll box when this one hits its edge. `"auto"` lets it through. */
+  overscrollBehavior?: string
+  overscrollBehaviorX?: string
+  overscrollBehaviorY?: string
 
   cursor?: CursorValue
   /** `"auto"` blocks hits behind this element **and its wheel**. `"none"` never
