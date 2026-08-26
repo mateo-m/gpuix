@@ -14,5 +14,5 @@ pub mod selection;
 
 pub use paint::{
     chrome_text, log_painted_text, painted_text, range_rects, record_start_region, selectable_text,
-    selection_frame_reset, selection_key, selection_start_region, SelectableText, SharedSelection,
+    selection_frame_reset, selection_key, watch_copy_keystroke, selection_start_region, SelectableText, SharedSelection,
 };

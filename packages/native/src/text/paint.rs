@@ -61,7 +61,7 @@ thread_local! {
 }
 
 /// A zero-size canvas that clears the per-frame registries and installs the
-/// frame's copy and mouse-down listeners. Paint it FIRST in the root, before
+/// frame's mouse-down listener. Paint it FIRST in the root, before
 /// any text, so each frame holds exactly that frame's visible text elements
 /// in paint order.
 pub fn selection_frame_reset(selection: SharedSelection) -> impl IntoElement {
@@ -71,7 +71,6 @@ pub fn selection_frame_reset(selection: SharedSelection) -> impl IntoElement {
             REGISTRY.with(|r| r.borrow_mut().clear());
             START_REGIONS.with(|r| r.borrow_mut().clear());
             PAINTED.with(|p| p.borrow_mut().clear());
-            register_copy_listener(window, &selection);
             register_down_listener(window, &selection);
         },
     )
@@ -170,6 +169,10 @@ pub struct SelectableText {
     /// False under `userSelect: "none"`: the text is still painted, logged and
     /// clickable, but it does not join the selection registry.
     pub selectable: bool,
+    /// The cursor over the text. `new` picks the I-beam, as `cursor: auto`
+    /// does over text on the web. Pass `None` when an ancestor sets a cursor,
+    /// which CSS inherits, so the ancestor's choice stands.
+    pub cursor: Option<gpui::CursorStyle>,
 }
 
 impl SelectableText {
@@ -190,6 +193,7 @@ impl SelectableText {
             links: Vec::new(),
             on_link: None,
             selectable: true,
+            cursor: Some(gpui::CursorStyle::IBeam),
         }
     }
 }
@@ -208,6 +212,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
         links,
         on_link,
         selectable,
+        cursor,
     } = opts;
 
     let styled = match runs {
@@ -258,6 +263,7 @@ pub fn selectable_text(opts: SelectableText) -> gpui::AnyElement {
 
     div()
         .relative()
+        .when_some(cursor.filter(|_| selectable), |el, cursor| el.cursor(cursor))
         .child(underlay)
         .child(styled)
         .into_any_element()
@@ -501,16 +507,31 @@ fn register_listeners(window: &mut Window, key: &Arc<str>, selection: &SharedSel
 /// GPUIX has no keymap or action system, so this reads the raw keystroke.
 /// It lives on the frame reset rather than on each text element: registering it
 /// per element made one Cmd+C write the clipboard once per visible text node.
-fn register_copy_listener(window: &mut Window, selection: &SharedSelection) {
-    use gpui::{ClipboardItem, DispatchPhase, KeyDownEvent};
+/// Copy the selected text to the clipboard on cmd-c or ctrl-c.
+///
+/// This is a keystroke observer, not a key listener on an element. A key
+/// event only visits the elements between the window root and the focused
+/// element, and the selection belongs to no element, so no element on that
+/// path could own the listener. The observer runs after dispatch, and only
+/// when nothing stopped the event, so a focused input that copies its own
+/// text keeps the document selection out of the clipboard. The observer
+/// also runs when a key binding handled the stroke, so it skips strokes
+/// that resolved to an action.
+pub fn watch_copy_keystroke(
+    selection: &SharedSelection,
+    window: gpui::AnyWindowHandle,
+    cx: &mut gpui::App,
+) -> gpui::Subscription {
+    use gpui::ClipboardItem;
 
     let selection = selection.clone();
-    window.on_key_event(move |e: &KeyDownEvent, phase, _window, cx| {
-        if phase != DispatchPhase::Bubble {
-            return;
-        }
-        let m = &e.keystroke.modifiers;
-        if e.keystroke.key != "c" || !(m.platform || m.control) {
+    cx.observe_keystrokes(move |event, current, cx| {
+        let m = &event.keystroke.modifiers;
+        if current.window_handle() != window
+            || event.action.is_some()
+            || event.keystroke.key != "c"
+            || !(m.platform || m.control)
+        {
             return;
         }
         // Read out of the lock before touching platform code: the clipboard
@@ -519,7 +540,7 @@ fn register_copy_listener(window: &mut Window, selection: &SharedSelection) {
         if let Some(text) = text {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
-    });
+    })
 }
 
 /// The wash boxes for one byte range: one box per visual line the range covers,

@@ -35,7 +35,7 @@ use crate::retained_tree::RetainedTree;
 // Custom elements still style their own sub-parts directly.
 pub(crate) use crate::style::resolve::apply_styles;
 use crate::style::StyleDesc;
-use crate::text::{selection_frame_reset, SharedSelection};
+use crate::text::{selection_frame_reset, watch_copy_keystroke, SharedSelection};
 use crate::theme::Theme;
 
 gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
@@ -655,9 +655,17 @@ impl GpuixRenderer {
 
             match cx.open_window(
                 to_gpui_window_options(&window_options, bounds),
-                |_window, cx| {
-                    cx.new(|_| {
-                        GpuixView::new(tree.clone(), callback.clone(), title, selection.clone())
+                |window, cx| {
+                    let handle = window.window_handle();
+                    cx.new(|cx| {
+                        GpuixView::new(
+                            tree.clone(),
+                            callback.clone(),
+                            title,
+                            selection.clone(),
+                            handle,
+                            cx,
+                        )
                     })
                 },
             ) {
@@ -740,8 +748,11 @@ impl GpuixRenderer {
                         );
                         let window = match cx.open_window(
                             to_gpui_window_options(&window_options, bounds),
-                            |_window, cx| {
-                                cx.new(|_| GpuixView::new(tree, callback, title, selection))
+                            |window, cx| {
+                                let handle = window.window_handle();
+                                cx.new(|cx| {
+                                    GpuixView::new(tree, callback, title, selection, handle, cx)
+                                })
                             },
                         ) {
                             Ok(window) => window,
@@ -1622,6 +1633,8 @@ pub(crate) struct GpuixView {
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
+    /// Keeps the cmd-c observer alive for as long as the view.
+    _copy_subscription: gpui::Subscription,
     /// Persistent measurement and scroll state for React-backed virtual lists.
     virtual_lists: HashMap<u64, VirtualListEntry>,
     /// Motion / review clock. Live wall time unless automation freezes it.
@@ -1642,7 +1655,10 @@ impl GpuixView {
         event_callback: Option<EventCallback>,
         window_title: String,
         selection: SharedSelection,
+        window: gpui::AnyWindowHandle,
+        cx: &mut gpui::App,
     ) -> Self {
+        let copy_subscription = watch_copy_keystroke(&selection, window, cx);
         Self {
             tree,
             event_callback,
@@ -1653,6 +1669,7 @@ impl GpuixView {
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
             selection,
+            _copy_subscription: copy_subscription,
             virtual_lists: HashMap::new(),
             clock: crate::automation::AutomationClock::new(),
             root_cascade: RefCell::new(None),
