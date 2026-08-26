@@ -19,6 +19,76 @@ use lightningcss::values::position::{HorizontalPositionKeyword, VerticalPosition
 use crate::color::{self, ColorContext, Rgba};
 use crate::CssError;
 
+/// An easing between two stops: the control points `[x1, y1, x2, y2]` of a
+/// cubic bezier from (0, 0) to (1, 1). All zero means none, a straight mix.
+///
+/// CSS has no easing in gradients yet. This is the syntax the CSSWG proposal
+/// (csswg-drafts issue 1332) uses: an `<easing-function>` in the place of a
+/// colour hint, between two colour stops.
+pub type Easing = [f32; 4];
+
+/// Read one `<easing-function>` from CSS Easing 1. `linear` reads as none.
+pub fn easing(text: &str) -> Option<Easing> {
+    let lower = text.trim().to_ascii_lowercase();
+    match lower.as_str() {
+        "linear" => return Some([0.0; 4]),
+        "ease" => return Some([0.25, 0.1, 0.25, 1.0]),
+        "ease-in" => return Some([0.42, 0.0, 1.0, 1.0]),
+        "ease-out" => return Some([0.0, 0.0, 0.58, 1.0]),
+        "ease-in-out" => return Some([0.42, 0.0, 0.58, 1.0]),
+        _ => {}
+    }
+    let inner = lower.strip_prefix("cubic-bezier(")?.strip_suffix(')')?;
+    let numbers: Vec<f32> = inner
+        .split(',')
+        .map(|n| n.trim().parse::<f32>().ok().filter(|n| n.is_finite()))
+        .collect::<Option<_>>()?;
+    let [x1, y1, x2, y2] = numbers[..] else { return None };
+    let unit = 0.0..=1.0;
+    (unit.contains(&x1) && unit.contains(&x2)).then_some([x1, y1, x2, y2])
+}
+
+/// Split at the commas outside parentheses.
+fn split_top_level(text: &str) -> Vec<&str> {
+    let mut out = Vec::new();
+    let mut depth = 0i32;
+    let mut start = 0;
+    for (i, c) in text.char_indices() {
+        match c {
+            '(' => depth += 1,
+            ')' => depth = (depth - 1).max(0),
+            ',' if depth == 0 => {
+                out.push(&text[start..i]);
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+    out.push(&text[start..]);
+    out
+}
+
+/// Pull the easings out of a `linear-gradient()` so lightningcss can read
+/// the rest. Returns the value without them, how many arguments stay, and
+/// each easing with the index of the argument that follows it.
+fn split_easings(value: &str) -> Option<(String, usize, Vec<(usize, Easing)>)> {
+    let open = value.find('(')?;
+    let close = value.rfind(')')?;
+    let head = &value[..open];
+    if !head.trim().eq_ignore_ascii_case("linear-gradient") {
+        return None;
+    }
+    let mut kept = Vec::new();
+    let mut easings = Vec::new();
+    for piece in split_top_level(&value[open + 1..close]) {
+        match easing(piece) {
+            Some(easing) => easings.push((kept.len(), easing)),
+            None => kept.push(piece.trim()),
+        }
+    }
+    Some((format!("{head}({})", kept.join(", ")), kept.len(), easings))
+}
+
 /// Where the line of a linear gradient points.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub enum Line {
@@ -39,6 +109,8 @@ pub struct Stop {
     /// Where between this stop and the next the mix is half way, as a
     /// fraction of that span. 0 means no hint.
     pub hint: f32,
+    /// The easing to the next stop. All zero is none.
+    pub easing: Easing,
 }
 
 /// A `linear-gradient()` ready to paint.
@@ -76,7 +148,9 @@ pub struct Reading {
 
 /// Read one background value. `none` reads as `Ok(None)`.
 pub fn read(value: &str, context: &ColorContext) -> Result<Option<Reading>, CssError> {
-    let Ok(image) = Image::parse_string(value) else {
+    let (parsed, kept, easings) =
+        split_easings(value).unwrap_or_else(|| (value.to_string(), 0, Vec::new()));
+    let Ok(image) = Image::parse_string(&parsed) else {
         let reading = color::read(value, context)?;
         return Ok(Some(Reading {
             fill: Fill::Color(reading.color),
@@ -88,7 +162,15 @@ pub fn read(value: &str, context: &ColorContext) -> Result<Option<Reading>, CssE
         Image::Gradient(gradient) => match *gradient {
             Gradient::Linear(linear) => {
                 let line = line_of(&linear.direction);
-                let (stops, read_current_color) = fix_up(&linear.items, context, value)?;
+                // The direction, when written, is the one argument that is
+                // not an item. An easing sits after the item before it.
+                let offset = kept - linear.items.len();
+                let easings = easings
+                    .iter()
+                    .map(|(index, easing)| (index.checked_sub(offset + 1), *easing))
+                    .collect::<Vec<_>>();
+                let (stops, read_current_color) =
+                    fix_up(&linear.items, &easings, context, value)?;
                 Ok(Some(Reading {
                     fill: Fill::LinearGradient(LinearGradient { line, stops }),
                     read_current_color,
@@ -140,6 +222,7 @@ type Item = GradientItem<lightningcss::values::length::LengthPercentage>;
 struct Pending {
     color: Option<Rgba>,
     position: Option<f32>,
+    easing: Easing,
 }
 
 /// Turn the parsed items into stops with positions, the way CSS Images 3
@@ -153,6 +236,7 @@ struct Pending {
 /// the stop after it.
 fn fix_up(
     items: &[Item],
+    easings: &[(Option<usize>, Easing)],
     context: &ColorContext,
     value: &str,
 ) -> Result<(Vec<Stop>, bool), CssError> {
@@ -169,19 +253,33 @@ fn fix_up(
                         .as_ref()
                         .map(|p| fraction(p, value))
                         .transpose()?,
+                    easing: [0.0; 4],
                 });
             }
             GradientItem::Hint(position) => pending.push(Pending {
                 color: None,
                 position: Some(fraction(position, value)?),
+                easing: [0.0; 4],
             }),
         }
     }
+    let bad_value = || CssError::BadValue {
+        property: "background".to_string(),
+        value: value.to_string(),
+    };
     if pending.len() < 2 {
-        return Err(CssError::BadValue {
-            property: "background".to_string(),
-            value: value.to_string(),
-        });
+        return Err(bad_value());
+    }
+    // An easing goes between two colour stops, one per pair, and not next
+    // to a hint, which already says where the half-way point is.
+    for (index, easing) in easings {
+        let Some(index) = *index else { return Err(bad_value()) };
+        let both_colours = pending.get(index).is_some_and(|p| p.color.is_some())
+            && pending.get(index + 1).is_some_and(|p| p.color.is_some());
+        if !both_colours || pending[index].easing != [0.0; 4] {
+            return Err(bad_value());
+        }
+        pending[index].easing = *easing;
     }
 
     let last = pending.len() - 1;
@@ -216,7 +314,12 @@ fn fix_up(
     for (i, item) in pending.iter().enumerate() {
         let position = item.position.unwrap();
         match item.color {
-            Some(color) => stops.push(Stop { color, position, hint: 0.0 }),
+            Some(color) => stops.push(Stop {
+                color,
+                position,
+                hint: 0.0,
+                easing: item.easing,
+            }),
             None => {
                 let Some(previous) = stops.last_mut() else { continue };
                 let next = pending[i + 1..]
@@ -291,6 +394,39 @@ mod tests {
         assert_eq!(gradient.stops.len(), 2);
         assert!((gradient.stops[0].hint - 0.2).abs() < 1e-6);
         assert_eq!(gradient.stops[1].hint, 0.0);
+    }
+
+    #[test]
+    fn reads_an_easing_between_two_stops() {
+        let read = gradient("linear-gradient(to right, red, ease-in-out, blue)");
+        assert_eq!(read.stops.len(), 2);
+        assert_eq!(read.stops[0].easing, [0.42, 0.0, 0.58, 1.0]);
+        assert_eq!(read.stops[1].easing, [0.0; 4]);
+
+        let read =
+            gradient("linear-gradient(red, cubic-bezier(0.5, 0, 1, 1.5), blue 80%, green)");
+        assert_eq!(read.stops[0].easing, [0.5, 0.0, 1.0, 1.5]);
+        assert_eq!(read.stops[1].position, 0.8);
+        assert_eq!(read.stops[1].easing, [0.0; 4]);
+
+        // `linear` is the straight mix, which is what no easing does.
+        let read = gradient("linear-gradient(red, linear, blue)");
+        assert_eq!(read.stops[0].easing, [0.0; 4]);
+    }
+
+    #[test]
+    fn an_easing_needs_a_stop_on_each_side() {
+        let context = ColorContext::default();
+        for bad in [
+            "linear-gradient(ease-in, red, blue)",
+            "linear-gradient(red, blue, ease-in)",
+            "linear-gradient(red, ease-in, ease-out, blue)",
+            "linear-gradient(red, ease-in, 30%, blue)",
+            "linear-gradient(red, 30%, ease-in, blue)",
+            "linear-gradient(red, cubic-bezier(2, 0, 1, 1), blue)",
+        ] {
+            assert!(read(bad, &context).is_err(), "{bad}");
+        }
     }
 
     #[test]
