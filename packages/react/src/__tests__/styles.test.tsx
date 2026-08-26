@@ -1954,6 +1954,30 @@ describeNative("motion", () => {
     expect(plainB).toBeLessThan(40)
   })
 
+  it("eases the mix between two gradient stops", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 10 }}>
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, #0000ff)" }} />
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, ease-in, #0000ff)" }} />
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, cubic-bezier(0, 1, 0, 1), #0000ff)" }} />
+      </div>
+    )
+    // A quarter of the way along, ease-in is still mostly red, while the
+    // straight mix has given up a quarter of it. cubic-bezier(0, 1, 0, 1)
+    // jumps toward blue at once.
+    const [straightR] = renderer.pixelAt(60, 30)
+    const [easedR] = renderer.pixelAt(60, 80)
+    const [jumpedR] = renderer.pixelAt(60, 130)
+    expect(straightR).toBeGreaterThan(160)
+    expect(straightR).toBeLessThan(220)
+    expect(easedR).toBeGreaterThan(straightR + 20)
+    expect(jumpedR).toBeLessThan(straightR - 40)
+    // Both ends still land on the stops.
+    expect(renderer.pixelAt(12, 80)[0]).toBeGreaterThan(220)
+    expect(renderer.pixelAt(208, 80)[2]).toBeGreaterThan(220)
+  })
+
   it("cuts corners to the declared shape", () => {
     const { render, renderer } = createTestRoot()
     const box = { width: 100, height: 100, backgroundColor: "#ff0000" }
