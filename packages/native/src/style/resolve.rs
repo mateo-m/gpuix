@@ -140,7 +140,7 @@ pub(crate) fn apply_resolved<E: gpui::Styled>(mut el: E, resolved: &StyleRefinem
 /// value.
 pub(crate) fn apply_motion<E: gpui::Styled>(
     mut el: E,
-    frame: crate::motion::MotionFrame,
+    frame: &crate::motion::MotionFrame,
     declared: Option<&StyleDesc>,
 ) -> E {
     let motion = frame.style;
@@ -185,6 +185,34 @@ pub(crate) fn apply_motion<E: gpui::Styled>(
             el = el.rounded_br(radius);
         }
     }
+    if let Some(shape) = motion.corner_shape {
+        // Same rule as the radius: a property narrower than `cornerShape`
+        // keeps its corner. `corner` and `cornerShape` are what motion drives.
+        let narrow = declared.map(|style| {
+            let wide = StyleDesc {
+                corner: None,
+                corner_shape: None,
+                ..style.clone()
+            };
+            super::corners::resolve(&wide).shapes
+        });
+        let shape = gpui::CornerShape(shape.0 as f32);
+        let free = |pick: fn(&gpui::Corners<Option<f32>>) -> Option<f32>| {
+            narrow.as_ref().and_then(pick).is_none()
+        };
+        if free(|c| c.top_left) {
+            el = el.corner_shape_tl(shape);
+        }
+        if free(|c| c.top_right) {
+            el = el.corner_shape_tr(shape);
+        }
+        if free(|c| c.bottom_left) {
+            el = el.corner_shape_bl(shape);
+        }
+        if free(|c| c.bottom_right) {
+            el = el.corner_shape_br(shape);
+        }
+    }
     if let Some(opacity) = motion.opacity {
         el = el.opacity(opacity as f32);
     }
@@ -225,6 +253,27 @@ fn dimension(value: crate::style::DimensionValue) -> gpui::Length {
         crate::style::DimensionValue::Percentage(share) => gpui::relative(share as f32).into(),
         crate::style::DimensionValue::Auto => gpui::Length::Auto,
     }
+}
+
+/// The one fill an element paints, or none.
+///
+/// GPUI paints one fill per box, so an image wins over a colour outright. A
+/// browser would paint the image over the colour, which only differs when
+/// the image has transparent parts. `background` is the shorthand, so it
+/// loses to both longhands.
+fn background_fill(style: &StyleDesc, scope: &Scope) -> Option<gpuix_css::background::Fill> {
+    let image = style
+        .background_image
+        .as_deref()
+        .and_then(|text| scope.fill(text));
+    if image.is_some() {
+        return image;
+    }
+    style
+        .background_color
+        .as_deref()
+        .or(style.background.as_deref())
+        .and_then(|text| scope.fill(text))
 }
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope: &Scope) -> E {
@@ -380,13 +429,8 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
     if let Some(left) = scope.number(&style.left) {
         el = el.left(gpui::px(left as f32));
     }
-    if let Some(color) = style
-        .background_color
-        .as_deref()
-        .or(style.background.as_deref())
-        .and_then(|bg| scope.color(bg))
-    {
-        el = el.bg(crate::color::to_hsla(color));
+    if let Some(fill) = background_fill(style, scope) {
+        el = el.bg(crate::color::to_background(&fill));
     }
     if let Some(color) = style.color.as_deref().and_then(|c| scope.color(c)) {
         el = el.text_color(crate::color::to_hsla(color));
@@ -439,21 +483,30 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
             _ => {}
         }
     }
-    if let Some(radius) = scope.number(&style.border_radius) {
-        el = el.rounded(gpui::px(radius as f32));
-    }
-    // Apply corner longhands after the shorthand so the explicit corner wins.
-    if let Some(radius) = scope.number(&style.border_top_left_radius) {
+    let corners = super::corners::resolve(style);
+    if let Some(radius) = scope.number(&corners.radii.top_left) {
         el = el.rounded_tl(gpui::px(radius as f32));
     }
-    if let Some(radius) = scope.number(&style.border_top_right_radius) {
+    if let Some(radius) = scope.number(&corners.radii.top_right) {
         el = el.rounded_tr(gpui::px(radius as f32));
     }
-    if let Some(radius) = scope.number(&style.border_bottom_left_radius) {
+    if let Some(radius) = scope.number(&corners.radii.bottom_left) {
         el = el.rounded_bl(gpui::px(radius as f32));
     }
-    if let Some(radius) = scope.number(&style.border_bottom_right_radius) {
+    if let Some(radius) = scope.number(&corners.radii.bottom_right) {
         el = el.rounded_br(gpui::px(radius as f32));
+    }
+    if let Some(shape) = corners.shapes.top_left {
+        el = el.corner_shape_tl(gpui::CornerShape(shape));
+    }
+    if let Some(shape) = corners.shapes.top_right {
+        el = el.corner_shape_tr(gpui::CornerShape(shape));
+    }
+    if let Some(shape) = corners.shapes.bottom_left {
+        el = el.corner_shape_bl(gpui::CornerShape(shape));
+    }
+    if let Some(shape) = corners.shapes.bottom_right {
+        el = el.corner_shape_br(gpui::CornerShape(shape));
     }
     // `borderWidth: 0` must clear a border, not be ignored: an element that
     // draws its own border needs a way for the caller to remove it.
@@ -490,10 +543,8 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
     if let Some(opacity) = scope.number(&style.opacity) {
         el = el.opacity(opacity as f32);
     }
-    match style.cursor.as_deref() {
-        Some("pointer") => el = el.cursor_pointer(),
-        Some("default") => el = el.cursor_default(),
-        _ => {}
+    if let Some(cursor) = style.cursor.as_deref().and_then(cursor_style) {
+        el = el.cursor(cursor);
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
     // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
@@ -604,6 +655,34 @@ mod tests {
             resolved.states.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
             vec![State::Hover, State::Active]
         );
+    }
+
+    #[test]
+    fn a_gradient_image_wins_over_the_colour() {
+        let style = StyleDesc {
+            background_color: Some("#111111".to_string()),
+            background_image: Some("linear-gradient(to right, red, blue)".to_string()),
+            ..Default::default()
+        };
+        let fill = background_of(&style, &no_variables()).expect("a fill");
+        let background = fill.color().expect("a background");
+        assert!(background.as_solid().is_none(), "should be a gradient: {background:?}");
+
+        // `none` steps aside for the colour underneath.
+        let style = StyleDesc {
+            background_image: Some("none".to_string()),
+            ..style
+        };
+        let fill = background_of(&style, &no_variables()).expect("a fill");
+        assert!(fill.color().and_then(|b| b.as_solid()).is_some());
+
+        // The shorthand takes a gradient too.
+        let shorthand = StyleDesc {
+            background: Some("linear-gradient(red, blue)".to_string()),
+            ..Default::default()
+        };
+        let fill = background_of(&shorthand, &no_variables()).expect("a fill");
+        assert!(fill.color().and_then(|b| b.as_solid()).is_none());
     }
 
     #[test]
@@ -770,4 +849,34 @@ mod tests {
         let resolved = Resolved::build(&style, &cascade);
         assert_eq!(resolved.base.padding.top, Some(gpui::px(24.0).into()));
     }
+}
+
+/// The GPUI cursor for a CSS `cursor` keyword. `auto` and unknown words set
+/// nothing, so the element keeps the cursor of whatever it sits in.
+pub(crate) fn cursor_style(name: &str) -> Option<gpui::CursorStyle> {
+    use gpui::CursorStyle::*;
+    Some(match name.trim() {
+        "default" => Arrow,
+        "pointer" => PointingHand,
+        "text" => IBeam,
+        "vertical-text" => IBeamCursorForVerticalLayout,
+        "crosshair" => Crosshair,
+        "grab" => OpenHand,
+        "grabbing" => ClosedHand,
+        "not-allowed" | "no-drop" => OperationNotAllowed,
+        "col-resize" => ResizeColumn,
+        "row-resize" => ResizeRow,
+        "e-resize" => ResizeRight,
+        "w-resize" => ResizeLeft,
+        "n-resize" => ResizeUp,
+        "s-resize" => ResizeDown,
+        "ew-resize" => ResizeLeftRight,
+        "ns-resize" => ResizeUpDown,
+        "nesw-resize" | "ne-resize" | "sw-resize" => ResizeUpRightDownLeft,
+        "nwse-resize" | "nw-resize" | "se-resize" => ResizeUpLeftDownRight,
+        "alias" => DragLink,
+        "copy" => DragCopy,
+        "context-menu" => ContextualMenu,
+        _ => return None,
+    })
 }

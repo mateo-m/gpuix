@@ -31,6 +31,12 @@ export interface MotionStyle {
   bottom?: Numeric
   left?: Numeric
   borderRadius?: Numeric
+  /**
+   * A corner shape keyword, `superellipse(K)` text, or the number `K` itself.
+   * Interpolates in the half-corner space CSS Borders 4 names, so
+   * `round` to `square` moves at an even pace.
+   */
+  cornerShape?: number | string
 }
 
 export type MotionEase =
@@ -118,8 +124,13 @@ export interface StyleDesc {
   bottom?: number
   left?: number
 
+  /** A colour or a `linear-gradient()`. The shorthand, so both longhands
+   *  win over it. */
   background?: string
   backgroundColor?: string
+  /** A `linear-gradient()` or `none`. Wins over `backgroundColor`, since a
+   *  box paints one fill. Stop positions are percentages. */
+  backgroundImage?: string
   color?: string
   opacity?: number
 
@@ -134,6 +145,63 @@ export interface StyleDesc {
   borderTopRightRadius?: Numeric
   borderBottomLeftRadius?: Numeric
   borderBottomRightRadius?: Numeric
+  borderStartStartRadius?: Numeric
+  borderStartEndRadius?: Numeric
+  borderEndStartRadius?: Numeric
+  borderEndEndRadius?: Numeric
+
+  /**
+   * CSS Borders 4 `corner-shape`, one to four of `round`, `squircle`,
+   * `square`, `bevel`, `scoop`, `notch` or `superellipse(K)`, read
+   * top-left, top-right, bottom-right, bottom-left like `borderRadius`.
+   * The shape only shows where the corner has a radius. A value the spec
+   * rejects drops the whole property. Logical names assume `horizontal-tb`
+   * and `ltr`.
+   */
+  cornerShape?: string
+  cornerTopLeftShape?: string
+  cornerTopRightShape?: string
+  cornerBottomRightShape?: string
+  cornerBottomLeftShape?: string
+  cornerStartStartShape?: string
+  cornerStartEndShape?: string
+  cornerEndStartShape?: string
+  cornerEndEndShape?: string
+  /** Two shapes, in the order the side runs: left to right, or top to bottom. */
+  cornerTopShape?: string
+  cornerRightShape?: string
+  cornerBottomShape?: string
+  cornerLeftShape?: string
+  cornerBlockStartShape?: string
+  cornerBlockEndShape?: string
+  cornerInlineStartShape?: string
+  cornerInlineEndShape?: string
+  /**
+   * Radius and shape together, in either order: `"8px squircle"`. A part
+   * you leave out resets, so `corner: "bevel"` also sets the radius to 0.
+   * `/` (elliptical radii) is not supported and makes the value invalid.
+   * A narrower property wins over a wider one, and a single-purpose one
+   * over a shorthand: `cornerTopLeftShape` beats `cornerTopLeft`, which
+   * beats `cornerTop`, which beats `cornerShape` and `borderRadius`, which
+   * beat `corner`.
+   */
+  corner?: string
+  cornerTopLeft?: string
+  cornerTopRight?: string
+  cornerBottomRight?: string
+  cornerBottomLeft?: string
+  cornerStartStart?: string
+  cornerStartEnd?: string
+  cornerEndStart?: string
+  cornerEndEnd?: string
+  cornerTop?: string
+  cornerRight?: string
+  cornerBottom?: string
+  cornerLeft?: string
+  cornerBlockStart?: string
+  cornerBlockEnd?: string
+  cornerInlineStart?: string
+  cornerInlineEnd?: string
   boxShadow?: BoxShadow
 
   fontSize?: Numeric
@@ -149,6 +217,13 @@ export interface StyleDesc {
   overflowX?: string
   overflowY?: string
 
+  /**
+   * A CSS cursor keyword: `default`, `pointer`, `text`, `vertical-text`,
+   * `crosshair`, `grab`, `grabbing`, `not-allowed`, `no-drop`, `col-resize`,
+   * `row-resize`, the eight `*-resize` directions, `alias`, `copy` and
+   * `context-menu`. `auto` and other words set nothing, so the element keeps
+   * the cursor of its parent. Selectable text shows the I-beam under `auto`.
+   */
   cursor?: string
   /** `"auto"` blocks hits behind this element. `"none"` never does. Unset blocks when the element paints a fill or is absolutely positioned. */
   pointerEvents?: "auto" | "none"

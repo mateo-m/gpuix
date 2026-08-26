@@ -10,6 +10,8 @@ import { useGpuixRequired } from "@gpuix/react"
 import type { StyleDesc } from "@gpuix/react"
 import { ClassNames } from "./class-names.js"
 import { Colors } from "./colors.js"
+import { Gradients } from "./gradients.js"
+import { Corners } from "./corners.js"
 import { Inheritance } from "./inheritance.js"
 import { Lengths } from "./lengths.js"
 import { Motion } from "./motion-panel.js"
@@ -65,6 +67,8 @@ export const BASE: StyleDesc = {
 
 const SECTIONS = [
   { id: "colors", title: "Colours", render: () => <Colors /> },
+  { id: "gradients", title: "Gradients", render: () => <Gradients /> },
+  { id: "corners", title: "Corner shape", render: () => <Corners /> },
   { id: "lengths", title: "Lengths", render: () => <Lengths /> },
   { id: "variables", title: "Variables", render: () => <Variables /> },
   { id: "inheritance", title: "Inheritance", render: () => <Inheritance /> },

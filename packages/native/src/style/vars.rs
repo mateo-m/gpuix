@@ -138,6 +138,23 @@ impl<'a> Scope<'a> {
         Some(reading.color)
     }
 
+    /// The fill a `background` or `background-image` declaration names.
+    ///
+    /// `None` when the value is `none`, or when it is not something this
+    /// build paints. A colour or a `linear-gradient()` are what it paints.
+    pub fn fill(&self, text: &str) -> Option<gpuix_css::background::Fill> {
+        let text = self.value(text)?;
+        let context = ColorContext {
+            current_color: self.current_color,
+            dark: self.dark,
+        };
+        let reading = gpuix_css::background::read(&text, &context).ok()??;
+        if reading.read_current_color {
+            self.used.set(true);
+        }
+        Some(reading.fill)
+    }
+
     /// Whether resolving read a variable.
     pub fn used_a_variable(&self) -> bool {
         self.used.get()

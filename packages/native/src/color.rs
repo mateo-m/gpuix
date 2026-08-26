@@ -29,6 +29,36 @@ pub(crate) fn to_hsla(color: Rgba) -> gpui::Hsla {
     to_gpui(color).into()
 }
 
+/// Turn a fill the engine read into what GPUI paints.
+///
+/// A gradient carries its stops already fixed up, so this only copies them
+/// across.
+pub(crate) fn to_background(fill: &gpuix_css::background::Fill) -> gpui::Background {
+    use gpuix_css::background::{Fill, Line};
+    match fill {
+        Fill::Color(color) => to_hsla(*color).into(),
+        Fill::LinearGradient(gradient) => {
+            let line = match gradient.line {
+                Line::Angle(degrees) => gpui::GradientLine::Angle(degrees),
+                Line::ToTopLeft => gpui::GradientLine::ToTopLeft,
+                Line::ToTopRight => gpui::GradientLine::ToTopRight,
+                Line::ToBottomRight => gpui::GradientLine::ToBottomRight,
+                Line::ToBottomLeft => gpui::GradientLine::ToBottomLeft,
+            };
+            let stops: Vec<gpui::LinearColorStop> = gradient
+                .stops
+                .iter()
+                .map(|stop| gpui::LinearColorStop {
+                    color: to_hsla(stop.color),
+                    percentage: stop.position,
+                    hint: stop.hint,
+                })
+                .collect();
+            gpui::linear_gradient_stops(line, &stops)
+        }
+    }
+}
+
 /// Read a colour that depends on the element or the window.
 ///
 /// `currentColor` and `light-dark()` both need context, so this is the entry

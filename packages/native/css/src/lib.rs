@@ -8,6 +8,7 @@
 //! reads live on the element and its ancestors. Such a value comes back as
 //! `Parsed::Pending`, and the cascade finishes it later with `substitute`.
 
+pub mod background;
 pub mod color;
 pub mod length;
 

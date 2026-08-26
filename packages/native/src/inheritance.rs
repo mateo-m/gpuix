@@ -30,6 +30,10 @@ use crate::style::StyleDesc;
 struct Values {
     /// False once an ancestor sets `userSelect: "none"`.
     selectable: bool,
+    /// True once an ancestor sets a `cursor` other than `auto`. CSS inherits
+    /// the cursor, and GPUI keeps a parent's cursor over a child that sets
+    /// none, so this only has to tell selectable text not to show its I-beam.
+    cursor_declared: bool,
     /// Selection wash colour for this subtree.
     selection_wash: Rgba,
     /// The computed `color` here, which is what `currentColor` names.
@@ -110,6 +114,7 @@ impl Inherited {
         let wash = Rgba { a: 0.35, ..accent };
         Self(Arc::new(Values {
             selectable: true,
+            cursor_declared: false,
             selection_wash: wash,
             color: Rgba::BLACK,
             dark,
@@ -134,6 +139,11 @@ impl Inherited {
             Some("none") => next.selectable = false,
             Some("text") | Some("auto") => next.selectable = true,
             _ => {}
+        }
+        match style.cursor.as_deref() {
+            Some("auto") => next.cursor_declared = false,
+            Some(_) => next.cursor_declared = true,
+            None => {}
         }
         if let Some(text) = style.selection_color.as_deref() {
             let context = gpuix_css::color::ColorContext {
@@ -184,6 +194,11 @@ impl Inherited {
         self.0.selectable
     }
 
+    /// Whether an ancestor set a `cursor` that this subtree inherits.
+    pub fn cursor_declared(&self) -> bool {
+        self.0.cursor_declared
+    }
+
     /// The selection wash colour for this subtree.
     pub fn selection_wash(&self) -> Rgba {
         self.0.selection_wash
@@ -229,6 +244,17 @@ mod tests {
         let mut style = StyleDesc::default();
         build(&mut style);
         style
+    }
+
+    #[test]
+    fn a_declared_cursor_reaches_the_subtree_until_auto_resets_it() {
+        let root = Inherited::root(Rgba::BLACK, false, 16.0);
+        assert!(!root.cursor_declared());
+        let link = root.descend(Some(&styled(|s| s.cursor = Some("pointer".into()))));
+        assert!(link.cursor_declared());
+        assert!(link.descend(None).cursor_declared());
+        let reset = link.descend(Some(&styled(|s| s.cursor = Some("auto".into()))));
+        assert!(!reset.cursor_declared());
     }
 
     #[test]

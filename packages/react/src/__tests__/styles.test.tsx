@@ -1922,6 +1922,107 @@ describeNative("motion", () => {
     box.done()
   })
 
+  it("paints a linear gradient across the box", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", gap: 10, padding: 10 }}>
+        <div style={{ width: 200, height: 40, backgroundImage: "linear-gradient(to right, #ff0000, #0000ff)" }} />
+        <div style={{ width: 200, height: 40, background: "linear-gradient(#ff0000 50%, #0000ff 50%)" }} />
+        <div style={{ width: 200, height: 40, backgroundColor: "#ff0000", backgroundImage: "none" }} />
+      </div>
+    )
+    // Left edge red, right edge blue, middle a mix of both.
+    const [leftR, , leftB] = renderer.pixelAt(12, 30)
+    const [rightR, , rightB] = renderer.pixelAt(208, 30)
+    const [midR, , midB] = renderer.pixelAt(110, 30)
+    expect(leftR).toBeGreaterThan(220)
+    expect(leftB).toBeLessThan(40)
+    expect(rightB).toBeGreaterThan(220)
+    expect(rightR).toBeLessThan(40)
+    expect(midR).toBeGreaterThan(80)
+    expect(midB).toBeGreaterThan(80)
+
+    // Two stops in one place make a hard edge, and the shorthand takes a gradient.
+    const [topR] = renderer.pixelAt(110, 65)
+    const [, , bottomB] = renderer.pixelAt(110, 95)
+    expect(topR).toBeGreaterThan(220)
+    expect(bottomB).toBeGreaterThan(220)
+
+    // `none` leaves the colour to paint.
+    const [plainR, , plainB] = renderer.pixelAt(110, 130)
+    expect(plainR).toBeGreaterThan(220)
+    expect(plainB).toBeLessThan(40)
+  })
+
+  it("cuts corners to the declared shape", () => {
+    const { render, renderer } = createTestRoot()
+    const box = { width: 100, height: 100, backgroundColor: "#ff0000" }
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 10, padding: 10 }}>
+        <div style={{ ...box, borderRadius: 40 }} />
+        <div style={{ ...box, borderRadius: 40, cornerShape: "bevel" }} />
+        <div style={{ ...box, borderRadius: 40, cornerShape: "square" }} />
+        <div style={{ ...box, corner: "40px notch" }} />
+        <div style={{ ...box, corner: "40px scoop bevel", cornerTopLeftShape: "oval" }} />
+      </div>
+    )
+    // Boxes sit at x = 10, 120, 230, 340, 450. The window is opaque, so the
+    // colour tells the fill from the background, not the alpha.
+    const red = (x: number, y: number) => {
+      const [r, g, b] = renderer.pixelAt(x, y)
+      return r > 200 && g < 60 && b < 60
+    }
+    // (8, 8) from the corner: outside a 40px circle, a bevel, a scoop and a
+    // notch, inside a square.
+    expect(red(18, 18)).toBe(false)
+    expect(red(128, 18)).toBe(false)
+    expect(red(238, 18)).toBe(true)
+    expect(red(348, 18)).toBe(false)
+    expect(red(458, 18)).toBe(false)
+    // (14, 14): inside the circle, still cut by the bevel line x + y = 40.
+    expect(red(24, 24)).toBe(true)
+    expect(red(134, 24)).toBe(false)
+    // (35, 35): the notch removes the whole 40px square.
+    expect(red(375, 45)).toBe(false)
+    // (20, 20): 28px from the corner, inside the scoop's 40px cut-out. The
+    // invalid `oval` longhand drops itself, so the shorthand's scoop stays.
+    expect(red(470, 30)).toBe(false)
+    // The centre of every box is filled.
+    for (const left of [10, 120, 230, 340, 450]) expect(red(left + 50, 60)).toBe(true)
+  })
+
+  it("bends toward content that grows while it opens", () => {
+    const { render, renderer } = createTestRoot()
+    const tree = (rows: number) => (
+      <motion.div
+        initial={{ height: 0 }}
+        animate={{ height: "auto" }}
+        transition={{ duration: 1, ease: "linear" }}
+        style={{ width: 200 }}
+      >
+        {Array.from({ length: rows }, (_, index) => (
+          <div key={index} style={{ width: 200, height: 100 }} />
+        ))}
+      </motion.div>
+    )
+    renderer.clockPause()
+    render(tree(1))
+    const id = renderer.findByType("div")[0]!.id
+    const height = () => renderer.getElementBounds(id)?.[3] ?? -1
+
+    renderer.clockFastForward(500)
+    expect(height()).toBeCloseTo(50, 0)
+
+    // A second row doubles the content half way through. The box used to
+    // jump to half of the new content on the next frame.
+    render(tree(2))
+    renderer.clockFastForward(16)
+    expect(height()).toBeLessThan(60)
+    renderer.clockFastForward(484)
+    expect(height()).toBeCloseTo(200, 0)
+    renderer.clockResume()
+  })
+
   it("renders the normal element when an internal motion payload is invalid", () => {
     const { render, renderer } = createTestRoot()
 
