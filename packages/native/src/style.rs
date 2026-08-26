@@ -401,6 +401,16 @@ style_desc! {
     background: Option<String> = "background",
     background_color: Option<String> = "backgroundColor",
     background_image: Option<String> = "backgroundImage",
+    /// How `backgroundImage` mixes with `backgroundColor`, a `<blend-mode>`.
+    background_blend_mode: Option<String> = "backgroundBlendMode",
+    /// How the element mixes with what is under it, a `<blend-mode>`.
+    mix_blend_mode: Option<String> = "mixBlendMode",
+    /// A CSS filter list on the element and its children, or `none`.
+    filter: Option<String> = "filter",
+    /// A CSS filter list on what is under the element, or `none`.
+    backdrop_filter: Option<String> = "backdropFilter",
+    /// A gradient whose alpha keeps or drops each pixel, or `none`.
+    mask_image: Option<String> = "maskImage",
     color: Option<String> = "color",
     opacity: Option<Numeric> = "opacity",
 
@@ -473,6 +483,10 @@ style_desc! {
     overflow: Option<String> = "overflow",
     overflow_x: Option<String> = "overflowX",
     overflow_y: Option<String> = "overflowY",
+    /// `auto`, `contain` or `none`, one for both axes or one per axis.
+    overscroll_behavior: Option<String> = "overscrollBehavior",
+    overscroll_behavior_x: Option<String> = "overscrollBehaviorX",
+    overscroll_behavior_y: Option<String> = "overscrollBehaviorY",
 
     // Cursor
     cursor: Option<String> = "cursor",

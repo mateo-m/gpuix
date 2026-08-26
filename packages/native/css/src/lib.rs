@@ -10,6 +10,7 @@
 
 pub mod background;
 pub mod color;
+pub mod effects;
 pub mod length;
 
 use std::collections::HashMap;

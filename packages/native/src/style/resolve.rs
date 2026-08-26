@@ -255,25 +255,60 @@ fn dimension(value: crate::style::DimensionValue) -> gpui::Length {
     }
 }
 
-/// The one fill an element paints, or none.
+/// The colour and the image a box paints, image over colour, as a browser
+/// paints `background-color` under `background-image`.
 ///
-/// GPUI paints one fill per box, so an image wins over a colour outright. A
-/// browser would paint the image over the colour, which only differs when
-/// the image has transparent parts. `background` is the shorthand, so it
-/// loses to both longhands.
-fn background_fill(style: &StyleDesc, scope: &Scope) -> Option<gpuix_css::background::Fill> {
-    let image = style
-        .background_image
-        .as_deref()
-        .and_then(|text| scope.fill(text));
-    if image.is_some() {
-        return image;
+/// `background` is the shorthand. A colour in it is the colour, a gradient in
+/// it is the image, and a declared longhand wins over it either way. A
+/// longhand that reads as nothing, like `backgroundImage: "none"` or a value
+/// this build cannot paint, still wins, so the shorthand does not show
+/// through it.
+fn background_fills(
+    style: &StyleDesc,
+    scope: &Scope,
+) -> (
+    Option<gpuix_css::background::Fill>,
+    Option<gpuix_css::background::Fill>,
+) {
+    use gpuix_css::background::Fill;
+    let (mut color, mut image) = match style.background.as_deref().and_then(|t| scope.fill(t)) {
+        Some(Fill::Color(c)) => (Some(Fill::Color(c)), None),
+        Some(gradient) => (None, Some(gradient)),
+        None => (None, None),
+    };
+    if let Some(text) = style.background_color.as_deref() {
+        color = scope.fill(text);
     }
-    style
-        .background_color
-        .as_deref()
-        .or(style.background.as_deref())
-        .and_then(|text| scope.fill(text))
+    if let Some(text) = style.background_image.as_deref() {
+        image = scope.fill(text);
+    }
+    (color, image)
+}
+
+/// The `overscroll-behavior` of one axis, from its longhand or the
+/// shorthand. The shorthand takes one word for both axes or two, x first.
+fn overscroll(
+    longhand: Option<&str>,
+    shorthand: Option<&str>,
+    axis: usize,
+) -> Option<gpui::Overscroll> {
+    let word = match longhand {
+        Some(word) => word.trim(),
+        None => {
+            let words: Vec<&str> = shorthand?.split_whitespace().collect();
+            match words.len() {
+                1 => words[0],
+                2 => words[axis],
+                _ => return None,
+            }
+        }
+    };
+    match word {
+        "auto" => Some(gpui::Overscroll::Auto),
+        "contain" => Some(gpui::Overscroll::Contain),
+        "none" => Some(gpui::Overscroll::None),
+        _ => None,
+    }
 }
 
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope: &Scope) -> E {
@@ -429,8 +464,63 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
     if let Some(left) = scope.number(&style.left) {
         el = el.left(gpui::px(left as f32));
     }
-    if let Some(fill) = background_fill(style, scope) {
+    let (background_color, background_image) = background_fills(style, scope);
+    if let Some(fill) = background_color {
         el = el.bg(crate::color::to_background(&fill));
+    }
+    if let Some(fill) = background_image {
+        el = el.background_image(crate::color::to_background(&fill));
+    }
+    if let Some(mode) = style
+        .background_blend_mode
+        .as_deref()
+        .and_then(|text| scope.blend_mode(text))
+    {
+        el = el.background_blend_mode(mode);
+    }
+    if let Some(mode) = style
+        .mix_blend_mode
+        .as_deref()
+        .and_then(|text| scope.blend_mode(text))
+    {
+        el = el.blend_mode(mode);
+    }
+    if let Some(filter) = style.filter.as_deref().and_then(|text| scope.filter(text)) {
+        el = el
+            .blur(gpui::px(filter.blur))
+            .color_matrix(gpui::ColorMatrix(filter.matrix));
+    }
+    if let Some(filter) = style
+        .backdrop_filter
+        .as_deref()
+        .and_then(|text| scope.filter(text))
+    {
+        el = el
+            .backdrop_blur(gpui::px(filter.blur))
+            .backdrop_matrix(gpui::ColorMatrix(filter.matrix));
+    }
+    if let Some(mask) = style
+        .mask_image
+        .as_deref()
+        .and_then(|text| scope.fill(text))
+    {
+        el = el.mask(crate::color::to_background(&mask));
+    }
+    let overscroll_x = overscroll(
+        style.overscroll_behavior_x.as_deref(),
+        style.overscroll_behavior.as_deref(),
+        0,
+    );
+    let overscroll_y = overscroll(
+        style.overscroll_behavior_y.as_deref(),
+        style.overscroll_behavior.as_deref(),
+        1,
+    );
+    if overscroll_x.is_some() || overscroll_y.is_some() {
+        el = el.overscroll_behavior(
+            overscroll_x.unwrap_or_default(),
+            overscroll_y.unwrap_or_default(),
+        );
     }
     if let Some(color) = style.color.as_deref().and_then(|c| scope.color(c)) {
         el = el.text_color(crate::color::to_hsla(color));
@@ -657,32 +747,72 @@ mod tests {
         );
     }
 
+    fn image_of(style: &StyleDesc, cascade: &Inherited) -> Option<gpui::Background> {
+        Resolved::build(style, cascade).base.background_image
+    }
+
     #[test]
-    fn a_gradient_image_wins_over_the_colour() {
+    fn a_gradient_image_paints_over_the_colour() {
         let style = StyleDesc {
             background_color: Some("#111111".to_string()),
             background_image: Some("linear-gradient(to right, red, blue)".to_string()),
             ..Default::default()
         };
-        let fill = background_of(&style, &no_variables()).expect("a fill");
-        let background = fill.color().expect("a background");
-        assert!(background.as_solid().is_none(), "should be a gradient: {background:?}");
+        assert_eq!(background_of(&style, &no_variables()), fill("#111111"));
+        let image = image_of(&style, &no_variables()).expect("an image");
+        assert!(
+            image.as_solid().is_none(),
+            "should be a gradient: {image:?}"
+        );
 
-        // `none` steps aside for the colour underneath.
+        // `none` leaves the colour on its own.
         let style = StyleDesc {
             background_image: Some("none".to_string()),
             ..style
         };
-        let fill = background_of(&style, &no_variables()).expect("a fill");
-        assert!(fill.color().and_then(|b| b.as_solid()).is_some());
+        assert_eq!(background_of(&style, &no_variables()), fill("#111111"));
+        assert_eq!(image_of(&style, &no_variables()), None);
 
-        // The shorthand takes a gradient too.
+        // The shorthand takes a gradient too, and it is the image.
         let shorthand = StyleDesc {
             background: Some("linear-gradient(red, blue)".to_string()),
             ..Default::default()
         };
-        let fill = background_of(&shorthand, &no_variables()).expect("a fill");
-        assert!(fill.color().and_then(|b| b.as_solid()).is_none());
+        assert_eq!(background_of(&shorthand, &no_variables()), None);
+        assert!(image_of(&shorthand, &no_variables()).is_some());
+    }
+
+    #[test]
+    fn effects_reach_the_style() {
+        let style = StyleDesc {
+            filter: Some("blur(4px) grayscale(1)".to_string()),
+            backdrop_filter: Some("blur(20px)".to_string()),
+            mask_image: Some("linear-gradient(black, transparent)".to_string()),
+            mix_blend_mode: Some("multiply".to_string()),
+            background_blend_mode: Some("screen".to_string()),
+            overscroll_behavior: Some("contain auto".to_string()),
+            overscroll_behavior_y: Some("none".to_string()),
+            ..Default::default()
+        };
+        let base = Resolved::build(&style, &no_variables()).base;
+        let effects = base.effects.expect("effects");
+        assert_eq!(effects.blur, gpui::px(4.0));
+        assert!(!effects.color_matrix.is_identity());
+        assert_eq!(effects.backdrop_blur, gpui::px(20.0));
+        assert!(effects.mask.is_some());
+        assert_eq!(effects.blend_mode, gpui::BlendMode::Multiply);
+        assert_eq!(base.background_blend_mode, Some(gpui::BlendMode::Screen));
+        assert_eq!(base.overscroll_behavior.x, Some(gpui::Overscroll::Contain));
+        assert_eq!(base.overscroll_behavior.y, Some(gpui::Overscroll::None));
+
+        // `none` and a filter this build cannot paint both set nothing.
+        let style = StyleDesc {
+            filter: Some("drop-shadow(1px 1px red)".to_string()),
+            backdrop_filter: Some("none".to_string()),
+            ..Default::default()
+        };
+        let base = Resolved::build(&style, &no_variables()).base;
+        assert!(base.effects.is_none());
     }
 
     #[test]
