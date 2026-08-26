@@ -170,16 +170,18 @@ jobs:
           name: bindings-aarch64-apple-darwin
           path: packages/native/
 
-      - name: Typecheck React package
-        run: bun run typecheck
-        working-directory: packages/react
-
       - name: Run React tests
         run: bun run test
         working-directory: packages/react
 
       - name: Build React package
         run: bun run build
+        working-directory: packages/react
+
+      # After the build, never before it. The script cleans and rebuilds
+      # `dist`, and a plain `tsc` build fails with TS5055 when `dist` exists.
+      - name: Typecheck React package
+        run: bun run typecheck
         working-directory: packages/react
 
       - name: Run example tests
