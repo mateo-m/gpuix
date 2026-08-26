@@ -27,6 +27,7 @@ pub(super) struct BuildCtx<'a> {
     pub custom_registry: &'a mut CustomElementRegistry,
     pub virtual_lists: &'a mut HashMap<u64, VirtualListEntry>,
     pub motion_states: &'a mut HashMap<u64, crate::motion::MotionState>,
+    pub scrollbars: &'a mut super::scrollbar::States,
     pub now: std::time::Instant,
     pub motion_active: &'a mut bool,
     pub selection: SharedSelection,
@@ -361,13 +362,15 @@ pub(crate) fn build_div(
     // wide child fills the parent instead of overflowing. Zed's code-block path:
     // flex + min_w_0 on the scroller, flex_none on the child.
     let mut overflow_x_only = false;
+    let mut scrollbar = None;
     if let Some(style) = style {
         // Resolve each axis: axis-specific overrides shorthand.
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
+        let (resolved_x, resolved_y) = super::scrollbar::used_overflow(resolved_x, resolved_y);
 
-        let needs_scroll_x = resolved_x == Some("scroll");
-        let needs_scroll_y = resolved_y == Some("scroll");
+        let needs_scroll_x = super::scrollbar::scrolls(resolved_x);
+        let needs_scroll_y = super::scrollbar::scrolls(resolved_y);
 
         if needs_scroll_x && needs_scroll_y {
             el = el.overflow_scroll();
@@ -391,13 +394,42 @@ pub(crate) fn build_div(
                 .entry(element.id)
                 .or_insert_with(gpui::ScrollHandle::new);
             el = el.track_scroll(handle);
+
+            // The scrollbar. Classic bars reserve a gutter in the layout,
+            // which taffy takes as one width for both axes.
+            let mode = super::scrollbar::Mode::current(cx);
+            if let Some(spec) = super::scrollbar::Spec::from_style(style, mode) {
+                let state = ctx.scrollbars.entry(element.id).or_default().clone();
+                let reserved = spec.reserved(state.borrow().overflowed);
+                let gutter = reserved.x.max(reserved.y);
+                if gutter > gpui::px(0.0) {
+                    el = el.scrollbar_width(gutter);
+                    if spec.both_edges() {
+                        let padding = &mut el.style().padding;
+                        if needs_scroll_y {
+                            padding.left = Some(add_pixels(padding.left, gutter));
+                        }
+                        if needs_scroll_x {
+                            padding.top = Some(add_pixels(padding.top, gutter));
+                        }
+                    }
+                }
+                scrollbar = Some(super::scrollbar::Scrollbar::new(
+                    spec,
+                    handle.clone(),
+                    state,
+                    ctx.now,
+                ));
+            }
         } else {
             // Element is no longer scrollable — remove stale handle.
             ctx.scroll_handles.remove(&element.id);
+            ctx.scrollbars.remove(&element.id);
         }
     } else {
         // No style at all — remove stale handle if it existed.
         ctx.scroll_handles.remove(&element.id);
+        ctx.scrollbars.remove(&element.id);
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),
@@ -629,7 +661,23 @@ pub(crate) fn build_div(
         };
     }
 
+    // Last, so it paints over the content and takes the mouse first.
+    if let Some(scrollbar) = scrollbar {
+        el = el.child(scrollbar);
+    }
+
     el.into_any_element()
+}
+
+/// `length` plus `extra`. A pixel length adds. Any other unit gives way,
+/// because the sum would need the box's size to resolve.
+fn add_pixels(length: Option<gpui::DefiniteLength>, extra: gpui::Pixels) -> gpui::DefiniteLength {
+    match length {
+        Some(gpui::DefiniteLength::Absolute(gpui::AbsoluteLength::Pixels(pixels))) => {
+            (pixels + extra).into()
+        }
+        _ => extra.into(),
+    }
 }
 
 /// A selectable text run owned by `element_id`. Runs are left to gpui so the

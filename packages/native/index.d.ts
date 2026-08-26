@@ -59,6 +59,15 @@ export declare class GpuixRenderer {
   getWindowSize(): WindowSize
   /** `"hidden"` | `"minimal"` | `"full"`. Paints into the scene after layout. */
   setDebugFrameOverlay(mode: string): string
+  /**
+   * Scroll every ancestor scroll box so the element shows, like the
+   * web `scrollIntoView`. `block` places it on the y axis and
+   * `inline` on the x axis: `start`, `center`, `end` or `nearest`.
+   * The defaults match the web: `start` and `nearest`. The
+   * `scroll-margin` of the element and the `scroll-padding` of each
+   * box apply.
+   */
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
   /** Hidden → minimal → full → hidden. */
   cycleDebugFrameOverlay(): string
   getDebugFrameOverlay(): string
@@ -260,6 +269,11 @@ export declare class TestGpuixRenderer {
    * Call flush() after to apply the offset and re-render.
    */
   scrollTo(elementId: number, x: number, y: number): void
+  /**
+   * Scroll every ancestor scroll box so the element shows, like the
+   * web scrollIntoView. Call flush() after to apply and re-render.
+   */
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
   /**
    * Scroll a child into view by its index in the children list.
    * Call flush() after to apply and re-render.

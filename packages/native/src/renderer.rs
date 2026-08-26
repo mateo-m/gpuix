@@ -43,6 +43,8 @@ gpui::actions!(gpuix_focus, [FocusNext, FocusPrevious]);
 mod auto_height;
 mod batch;
 mod frame;
+pub(crate) mod scroll_into_view;
+pub(crate) mod scrollbar;
 mod virtual_list;
 
 pub(crate) use batch::apply_batch_to_tree;
@@ -68,6 +70,17 @@ pub(crate) fn to_element_id(id: f64) -> Result<u64> {
         return Err(Error::from_reason(format!("Invalid element id: {}", id)));
     }
     Ok(id as u64)
+}
+
+/// A scroll offset as the two JS numbers `[x, y]`. Adding `0.0` turns a
+/// negative zero into a plain zero. An unscrolled axis can carry `-0.0`,
+/// and a JS caller that compares offsets with `Object.is` separates `-0`
+/// from `0`.
+pub(crate) fn offset_to_js(offset: gpui::Point<gpui::Pixels>) -> [f64; 2] {
+    [
+        f64::from(f32::from(offset.x)) + 0.0,
+        f64::from(f32::from(offset.y)) + 0.0,
+    ]
 }
 
 thread_local! {
@@ -122,10 +135,7 @@ pub(crate) fn debug_frame_overlay_stats_js(
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-fn recv_ui_response<T>(
-    receiver: std::sync::mpsc::Receiver<T>,
-    operation: &str,
-) -> Result<T> {
+fn recv_ui_response<T>(receiver: std::sync::mpsc::Receiver<T>, operation: &str) -> Result<T> {
     match receiver.recv_timeout(Duration::from_secs(2)) {
         Ok(response) => Ok(response),
         Err(RecvTimeoutError::Timeout) => Err(Error::from_reason(format!(
@@ -221,6 +231,11 @@ enum UiCommand {
     ScrollToItem {
         id: u64,
         index: usize,
+    },
+    ScrollIntoView {
+        id: u64,
+        block: scroll_into_view::Align,
+        inline: scroll_into_view::Align,
     },
     GetScrollOffset {
         id: u64,
@@ -343,25 +358,30 @@ async fn run_ui_commands(
                 }
                 refresh_ui_window(window, cx)
             }
+            UiCommand::ScrollIntoView { id, block, inline } => {
+                window
+                    .update(cx, |view, _window, _cx| {
+                        let tree = view.tree.lock().unwrap();
+                        scroll_into_view::scroll_into_view(&tree, id, block, inline, |id| {
+                            SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
+                        });
+                    })
+                    .ok();
+                refresh_ui_window(window, cx)
+            }
             UiCommand::GetScrollOffset { id, response } => {
                 let offset = VIRTUAL_LIST_STATES
                     .with(|cell| {
                         cell.borrow().get(&id).map(|state| {
                             let offset = state.scroll_px_offset_for_scrollbar();
-                            [
-                                f64::from(f32::from(offset.x)),
-                                f64::from(f32::from(offset.y)),
-                            ]
+                            offset_to_js(offset)
                         })
                     })
                     .or_else(|| {
                         SCROLL_HANDLES.with(|cell| {
                             cell.borrow().get(&id).map(|handle| {
                                 let offset = handle.offset();
-                                [
-                                    f64::from(f32::from(offset.x)),
-                                    f64::from(f32::from(offset.y)),
-                                ]
+                                offset_to_js(offset)
                             })
                         })
                     });
@@ -496,13 +516,10 @@ impl GpuixRenderer {
             input,
             response: response_sender,
         })?;
-        recv_ui_response(response_receiver, "the GPUI UI command")?
-            .map_err(Error::from_reason)
+        recv_ui_response(response_receiver, "the GPUI UI command")?.map_err(Error::from_reason)
     }
 
-    fn automation_bounds(
-        &self,
-    ) -> Result<HashMap<u64, crate::automation::ElementBounds>> {
+    fn automation_bounds(&self) -> Result<HashMap<u64, crate::automation::ElementBounds>> {
         #[cfg(target_os = "macos")]
         return Ok(crate::automation::all_bounds());
 
@@ -522,10 +539,7 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
-    fn element_bounds(
-        &self,
-        id: u64,
-    ) -> Result<Option<crate::automation::ElementBounds>> {
+    fn element_bounds(&self, id: u64) -> Result<Option<crate::automation::ElementBounds>> {
         #[cfg(target_os = "macos")]
         return Ok(crate::automation::get_bounds(id));
 
@@ -1023,6 +1037,45 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Scroll every ancestor scroll box so the element shows, like the
+    /// web `scrollIntoView`. `block` places it on the y axis and
+    /// `inline` on the x axis: `start`, `center`, `end` or `nearest`.
+    /// The defaults match the web: `start` and `nearest`. The
+    /// `scroll-margin` of the element and the `scroll-padding` of each
+    /// box apply.
+    #[napi]
+    pub fn scroll_into_view(
+        &self,
+        element_id: f64,
+        block: Option<String>,
+        inline: Option<String>,
+    ) -> Result<()> {
+        let id = to_element_id(element_id)?;
+        let block = scroll_into_view::Align::parse(block.as_deref(), scroll_into_view::Align::Start);
+        let inline =
+            scroll_into_view::Align::parse(inline.as_deref(), scroll_into_view::Align::Nearest);
+        #[cfg(target_os = "macos")]
+        {
+            let tree = self.tree.lock().unwrap();
+            scroll_into_view::scroll_into_view(&tree, id, block, inline, |id| {
+                SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
+            });
+            drop(tree);
+            return invalidate_window();
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ScrollIntoView { id, block, inline });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
     /// Hidden → minimal → full → hidden.
     #[napi]
     pub fn cycle_debug_frame_overlay(&self) -> Result<String> {
@@ -1299,10 +1352,7 @@ impl GpuixRenderer {
             .with(|cell| {
                 cell.borrow().get(&id).map(|state| {
                     let offset = state.scroll_px_offset_for_scrollbar();
-                    vec![
-                        f64::from(f32::from(offset.x)),
-                        f64::from(f32::from(offset.y)),
-                    ]
+                    offset_to_js(offset).to_vec()
                 })
             })
             .or_else(|| {
@@ -1310,10 +1360,7 @@ impl GpuixRenderer {
                     let handles = cell.borrow();
                     handles.get(&id).map(|handle| {
                         let offset = handle.offset();
-                        vec![
-                            f64::from(f32::from(offset.x)),
-                            f64::from(f32::from(offset.y)),
-                        ]
+                        offset_to_js(offset).to_vec()
                     })
                 })
             }));
@@ -1323,8 +1370,7 @@ impl GpuixRenderer {
             let (response, receiver) = sync_channel(1);
             self.send_ui_command(UiCommand::GetScrollOffset { id, response })?;
             return Ok(
-                recv_ui_response(receiver, "the GPUI scroll query")?
-                    .map(|[x, y]| vec![x, y]),
+                recv_ui_response(receiver, "the GPUI scroll query")?.map(|[x, y]| vec![x, y])
             );
         }
 
@@ -1631,6 +1677,8 @@ pub(crate) struct GpuixView {
     pub(crate) scroll_handles: HashMap<u64, gpui::ScrollHandle>,
     /// Native animation clocks keyed by retained element ID.
     pub(crate) motion_states: HashMap<u64, crate::motion::MotionState>,
+    /// What each scroll box's scrollbar remembers between frames.
+    pub(crate) scrollbars: scrollbar::States,
     /// Live text selection, shared with the paint closures and the napi methods.
     pub(crate) selection: SharedSelection,
     /// Keeps the cmd-c observer alive for as long as the view.
@@ -1668,6 +1716,7 @@ impl GpuixView {
             custom_registry: CustomElementRegistry::with_defaults(),
             scroll_handles: HashMap::new(),
             motion_states: HashMap::new(),
+            scrollbars: HashMap::new(),
             selection,
             _copy_subscription: copy_subscription,
             virtual_lists: HashMap::new(),
@@ -1746,6 +1795,7 @@ impl GpuixView {
             custom_registry: &mut self.custom_registry,
             virtual_lists: &mut self.virtual_lists,
             motion_states: &mut self.motion_states,
+            scrollbars: &mut self.scrollbars,
             now,
             motion_active: &mut motion_active,
             selection: self.selection.clone(),
@@ -1800,10 +1850,7 @@ impl GpuixView {
             .get(&id)?
             .state
             .scroll_px_offset_for_scrollbar();
-        Some([
-            f64::from(f32::from(offset.x)),
-            f64::from(f32::from(offset.y)),
-        ])
+        Some(offset_to_js(offset))
     }
 
     pub(crate) fn reveal_virtual_list_ancestor(&self, id: u64) -> bool {
@@ -1974,6 +2021,7 @@ impl gpui::Render for GpuixView {
                     custom_registry: &mut self.custom_registry,
                     virtual_lists: &mut self.virtual_lists,
                     motion_states: &mut self.motion_states,
+                    scrollbars: &mut self.scrollbars,
                     now,
                     motion_active: &mut motion_active,
                     selection: self.selection.clone(),

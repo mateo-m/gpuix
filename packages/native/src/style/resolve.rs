@@ -637,17 +637,22 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
         el = el.cursor(cursor);
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
-    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
+    // overflow: "scroll" and "auto" need StatefulInteractiveElement, so build_div() handles them.
     // CSS precedence: axis-specific (overflowX/Y) overrides the shorthand (overflow).
     {
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
+        let (resolved_x, resolved_y) =
+            crate::renderer::scrollbar::used_overflow(resolved_x, resolved_y);
         // Only apply hidden here — scroll is handled in build_div.
-        if resolved_x == Some("hidden") && resolved_y == Some("hidden") {
+        // `clip` clips like `hidden`. The difference in CSS, that `clip`
+        // is not a scroll container for `scrollTo`, has no meaning here.
+        let hidden = |word: Option<&str>| matches!(word, Some("hidden") | Some("clip"));
+        if hidden(resolved_x) && hidden(resolved_y) {
             el = el.overflow_hidden();
-        } else if resolved_x == Some("hidden") {
+        } else if hidden(resolved_x) {
             el = el.overflow_x_hidden();
-        } else if resolved_y == Some("hidden") {
+        } else if hidden(resolved_y) {
             el = el.overflow_y_hidden();
         }
     }
