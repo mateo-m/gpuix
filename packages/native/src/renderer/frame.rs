@@ -93,11 +93,11 @@ pub(super) fn build_element(
     let built = match element.element_type.as_str() {
         "div" => {
             ctx.custom_registry.destroy(id);
-            build_div(element, style, resolved.clone(), motion, ctx, window, cx)
+            build_div(element, style, resolved.clone(), motion.as_ref(), ctx, window, cx)
         }
         "text" => {
             ctx.custom_registry.destroy(id);
-            build_text(element, style, resolved.clone(), motion, ctx, window, cx)
+            build_text(element, style, resolved.clone(), motion.as_ref(), ctx, window, cx)
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -109,7 +109,7 @@ pub(super) fn build_element(
             // Custom renderers take a `StyleDesc` and resolve it themselves, so
             // a motion frame reaches them folded into one. They are the only
             // callers that still pay for that fold.
-            let animated = motion.map(|frame| {
+            let animated = motion.as_ref().map(|frame| {
                 let mut declared = element.style.clone().unwrap_or_default();
                 frame.style.apply_to(&mut declared);
                 declared
@@ -145,7 +145,7 @@ pub(super) fn build_element(
         }
     };
 
-    let built = super::auto_height::wrap(id, built, motion, resolved.as_deref());
+    let built = super::auto_height::wrap(id, built, motion.as_ref(), resolved.as_deref());
 
     ctx.cascade = parent_cascade;
     built
@@ -291,7 +291,7 @@ pub(crate) fn build_div(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
-    motion: Option<crate::motion::MotionFrame>,
+    motion: Option<&crate::motion::MotionFrame>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -640,20 +640,24 @@ fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElem
         // `userSelect: "none"` label is exactly the chrome tests want to assert.
         return crate::text::chrome_text(gpui::SharedString::from(content.to_string()), None);
     }
-    selectable_text(crate::text::SelectableText::new(
+    let text = crate::text::SelectableText::new(
         gpui::SharedString::from(content.to_string()),
         None,
         selection_key(element_id, 0),
         ctx.selection.clone(),
         crate::color::to_hsla(ctx.cascade.selection_wash()),
-    ))
+    );
+    selectable_text(crate::text::SelectableText {
+        cursor: text.cursor.filter(|_| !ctx.cascade.cursor_declared()),
+        ..text
+    })
 }
 
 pub(crate) fn build_text(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
-    motion: Option<crate::motion::MotionFrame>,
+    motion: Option<&crate::motion::MotionFrame>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,

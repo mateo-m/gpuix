@@ -92,7 +92,7 @@ function Growing() {
   return (
     <Panel
       title="Content that changes while the animation runs"
-      note="The measurement repeats every frame, so the box follows the content instead of chasing a number it took once. Opening this one adds two rows after 200 milliseconds."
+      note="The measurement repeats every frame, so the box follows the content instead of chasing a number it took once. Opening this one adds two rows after 200 milliseconds. The height keeps what is on screen and bends the rest of the curve toward the new rows, so it ends on time with no jump."
     >
       <Row>
         <Button
