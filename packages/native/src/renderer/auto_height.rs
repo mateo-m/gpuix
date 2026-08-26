@@ -23,7 +23,7 @@ use crate::style::resolve::Resolved;
 pub(super) fn wrap(
     id: u64,
     built: AnyElement,
-    motion: Option<MotionFrame>,
+    motion: Option<&MotionFrame>,
     resolved: Option<&Resolved>,
 ) -> AnyElement {
     let Some((frame, height)) = motion.and_then(|frame| Some((frame, frame.measured_height()?)))
@@ -35,7 +35,7 @@ pub(super) fn wrap(
         .width
         .map(|value| px(value as f32))
         .or_else(|| absolute_pixels(resolved?.base.size.width));
-    AutoHeight::new(id, built, height, width).into_any_element()
+    AutoHeight::new(id, built, frame.clone(), height, width).into_any_element()
 }
 
 /// The pixels a resolved length is, or `None` when it is a share or `auto`.
@@ -76,6 +76,7 @@ struct Content {
 struct AutoHeight {
     id: u64,
     content: Rc<RefCell<Content>>,
+    frame: MotionFrame,
     height: MotionHeight,
     width: Option<Pixels>,
 }
@@ -84,6 +85,7 @@ impl AutoHeight {
     fn new(
         id: u64,
         element: AnyElement,
+        frame: MotionFrame,
         height: MotionHeight,
         width: Option<Pixels>,
     ) -> Self {
@@ -93,6 +95,7 @@ impl AutoHeight {
                 element,
                 layout: IsolatedLayout::new(),
             })),
+            frame,
             height,
             width,
         }
@@ -135,6 +138,7 @@ impl Element for AutoHeight {
         }
 
         let content = self.content.clone();
+        let frame = self.frame.clone();
         let height = self.height;
         let layout_id = window.request_measured_layout(
             style,
@@ -153,11 +157,25 @@ impl Element for AutoHeight {
                     .enter(window, |window| {
                         element.layout_as_root(size(width, AvailableSpace::MaxContent), window, cx)
                     });
+                let measured_height = f32::from(measured.height) as f64;
 
-                size(
-                    measured.width,
-                    px(height.resolve(f32::from(measured.height) as f64) as f32),
-                )
+                // The intrinsic passes measure at a width the box will not get,
+                // so only a pass with a real width reports.
+                if matches!(width, AvailableSpace::Definite(_)) {
+                    frame.measured.report(measured_height);
+                }
+
+                // While the animation runs, this frame resolves against the
+                // height the state already knows, so content that changed just
+                // now paints where the last frame did. The state takes the new
+                // measurement in at the next frame and bends the curve there.
+                // At rest, `auto` is the content and follows it at once.
+                let content_height = match frame.content {
+                    Some(known) if frame.active => known,
+                    _ => measured_height,
+                };
+
+                size(measured.width, px(height.resolve(content_height) as f32))
             },
         );
         (layout_id, ())
