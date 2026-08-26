@@ -225,6 +225,11 @@ export declare class TestGpuixRenderer {
   /** Drop the current selection. */
   clearSelection(): void
   /**
+   * The text the last clipboard write put there, or null when there is
+   * none or it was not text.
+   */
+  readClipboardText(): string | null
+  /**
    * Syntax-cache counters as `[hits, misses, documents]`.
    *
    * GPUIX rebuilds its whole element tree every frame, so a `<code>` block
@@ -279,6 +284,13 @@ export declare class TestGpuixRenderer {
    * macOS only — requires Metal GPU rendering via VisualTestAppContext.
    */
   captureScreenshot(path: string): void
+  /**
+   * The colour of one painted pixel as `[r, g, b, a]`, each 0 to 255.
+   *
+   * `x` and `y` are logical pixels from the top left of the window, the
+   * same space every other test coordinate is in.
+   */
+  pixelAt(x: number, y: number): Array<number>
   /**
    * Return and clear all collected events since the last drain.
    * Events are collected synchronously — no event loop queuing.

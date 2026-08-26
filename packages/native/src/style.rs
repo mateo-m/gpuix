@@ -1,3 +1,4 @@
+pub(crate) mod corners;
 pub(crate) mod resolve;
 pub(crate) mod vars;
 
@@ -399,6 +400,7 @@ style_desc! {
     // Background & Colors
     background: Option<String> = "background",
     background_color: Option<String> = "backgroundColor",
+    background_image: Option<String> = "backgroundImage",
     color: Option<String> = "color",
     opacity: Option<Numeric> = "opacity",
 
@@ -414,6 +416,47 @@ style_desc! {
     border_top_right_radius: Option<Numeric> = "borderTopRightRadius",
     border_bottom_left_radius: Option<Numeric> = "borderBottomLeftRadius",
     border_bottom_right_radius: Option<Numeric> = "borderBottomRightRadius",
+    border_start_start_radius: Option<Numeric> = "borderStartStartRadius",
+    border_start_end_radius: Option<Numeric> = "borderStartEndRadius",
+    border_end_start_radius: Option<Numeric> = "borderEndStartRadius",
+    border_end_end_radius: Option<Numeric> = "borderEndEndRadius",
+
+    // Corner shape (CSS Borders 4, section 3.9). `corner*` shorthands take a
+    // radius list and a shape list in either order; `*Shape` takes shapes only.
+    corner_shape: Option<String> = "cornerShape",
+    corner_top_left_shape: Option<String> = "cornerTopLeftShape",
+    corner_top_right_shape: Option<String> = "cornerTopRightShape",
+    corner_bottom_right_shape: Option<String> = "cornerBottomRightShape",
+    corner_bottom_left_shape: Option<String> = "cornerBottomLeftShape",
+    corner_start_start_shape: Option<String> = "cornerStartStartShape",
+    corner_start_end_shape: Option<String> = "cornerStartEndShape",
+    corner_end_start_shape: Option<String> = "cornerEndStartShape",
+    corner_end_end_shape: Option<String> = "cornerEndEndShape",
+    corner_top_shape: Option<String> = "cornerTopShape",
+    corner_right_shape: Option<String> = "cornerRightShape",
+    corner_bottom_shape: Option<String> = "cornerBottomShape",
+    corner_left_shape: Option<String> = "cornerLeftShape",
+    corner_block_start_shape: Option<String> = "cornerBlockStartShape",
+    corner_block_end_shape: Option<String> = "cornerBlockEndShape",
+    corner_inline_start_shape: Option<String> = "cornerInlineStartShape",
+    corner_inline_end_shape: Option<String> = "cornerInlineEndShape",
+    corner: Option<String> = "corner",
+    corner_top_left: Option<String> = "cornerTopLeft",
+    corner_top_right: Option<String> = "cornerTopRight",
+    corner_bottom_right: Option<String> = "cornerBottomRight",
+    corner_bottom_left: Option<String> = "cornerBottomLeft",
+    corner_start_start: Option<String> = "cornerStartStart",
+    corner_start_end: Option<String> = "cornerStartEnd",
+    corner_end_start: Option<String> = "cornerEndStart",
+    corner_end_end: Option<String> = "cornerEndEnd",
+    corner_top: Option<String> = "cornerTop",
+    corner_right: Option<String> = "cornerRight",
+    corner_bottom: Option<String> = "cornerBottom",
+    corner_left: Option<String> = "cornerLeft",
+    corner_block_start: Option<String> = "cornerBlockStart",
+    corner_block_end: Option<String> = "cornerBlockEnd",
+    corner_inline_start: Option<String> = "cornerInlineStart",
+    corner_inline_end: Option<String> = "cornerInlineEnd",
     box_shadow: Option<BoxShadowValue> = "boxShadow",
 
     // Text
