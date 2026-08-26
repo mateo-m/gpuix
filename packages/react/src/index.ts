@@ -9,7 +9,13 @@ export {
   startFrameLoop,
 } from "./reconciler/renderer.js"
 export { GpuixContext, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
-export { useWindowSize } from "./hooks/use-window-size.js"
+export { useWindowInsets, useWindowSize } from "./hooks/use-window-size.js"
+export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
+export type {
+  FindRangesOptions,
+  TextSearch,
+  TextSearchOptions,
+} from "./hooks/use-text-search.js"
 export {
   Select,
   SelectContent,
@@ -60,34 +66,39 @@ export type {
   TooltipProviderProps,
   TooltipTriggerProps,
 } from "./components/tooltip.js"
-export { motion, VirtualList } from "./components/index.js"
+export { motion } from "./components/index.js"
 export type { Root, FrameLoop, RenderOptions } from "./reconciler/renderer.js"
-export type { WindowSize } from "./hooks/use-window-size.js"
+export type {
+  WindowInsets,
+  WindowInsetsOptions,
+  WindowSize,
+  WindowSizeOptions,
+} from "./hooks/use-window-size.js"
 
 // Re-export types
-export type { MotionDivProps, WindowedVirtualListProps } from "./components/index.js"
+export type { MotionDivProps } from "./components/index.js"
 export type {
+  CursorValue,
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  EdgeInsets,
+  HighlightMatch,
+  HighlightSpec,
   MotionEase,
   MotionProps,
   MotionStyle,
   MotionTransition,
   NativeRenderer,
+  NativeWindowInsets,
   StyleDesc,
 } from "./types/host.js"
 export { handleGpuixEvent } from "./reconciler/event-registry.js"
-
-// Testing utilities
 export {
-  TestRenderer,
   applyMacCpuThrottleFromEnv,
-  createTestRoot,
-  hasNativeTestRenderer,
+  MAC_CPU_THROTTLES,
   readMacCpuThrottle,
-} from "./testing.js"
-export { connectTest, launch } from "./automation/index.js"
-export type { MacCpuThrottle, TestRoot, TestElement } from "./testing.js"
+} from "./cpu-throttle.js"
+export type { MacCpuThrottle } from "./cpu-throttle.js"
 export type {
   EventPayload,
   EventModifiers,

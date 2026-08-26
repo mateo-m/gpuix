@@ -57,7 +57,7 @@ impl VirtualListConfig {
             .and_then(serde_json::Value::as_f64)
             .filter(|height| *height > 0.0)
             .map(|height| height as f32);
-        let item_count = prop("itemCount").and_then(json_usize);
+        let item_count = estimated_item_height.and_then(|_| prop("itemCount").and_then(json_usize));
         Self {
             alignment,
             follow_tail,
@@ -205,6 +205,27 @@ impl VirtualListEntry {
             return;
         }
 
+        // gpui anchors a list on a logical item, so splicing rows in at the
+        // front keeps the rows already on screen and pushes the new ones above
+        // the viewport. A browser anchors too, but suppresses it at scrollTop 0,
+        // so a prepend is visible. Match the browser: remember a list pinned to
+        // the top and put it back after the splice.
+        //
+        // While the content is shorter than the viewport gpui re-anchors to
+        // item 0 every layout, so the drift only appears once the list
+        // overflows. That is why `example-app` looked stuck at two rows.
+        //
+        // The guard is `is_following_tail()`, not `config.follow_tail`: a
+        // following list that does not fill its viewport also ends layout
+        // anchored at {0, 0}, and `scroll_to` would call `stop_following` on it.
+        // Once the user scrolls up to the top, following is already stopped, so
+        // a top-aligned `followTail` list still gets the browser behaviour.
+        let top = self.state.logical_scroll_top();
+        let was_pinned_to_top = matches!(config.alignment, gpui::ListAlignment::Top)
+            && !self.state.is_following_tail()
+            && top.item_ix == 0
+            && top.offset_in_item <= gpui::px(0.0);
+
         // A windowed list's children are a sliding viewport. Splicing by
         // child position would treat a scroll as a rewrite of items 0..N.
         if config.item_count.is_none() && self.child_ids != child_ids {
@@ -265,9 +286,39 @@ impl VirtualListEntry {
                 .remeasure_items(start..window_start + child_ids.len());
         }
 
+        self.remeasure_unknown_rows(window_start, &child_ids, &old_rows);
+        if was_pinned_to_top {
+            self.state.scroll_to(gpui::ListOffset::default());
+        }
+
         self.window_start = window_start;
         self.child_ids = child_ids;
         self.child_revisions = child_revisions;
         self.row_focus_handles = row_focus_handles;
+    }
+
+    fn remeasure_unknown_rows(
+        &mut self,
+        window_start: usize,
+        child_ids: &[u64],
+        known: &HashMap<u64, (u64, Option<gpui::FocusHandle>)>,
+    ) {
+        let mut range_start = None;
+        for (offset, id) in child_ids.iter().enumerate() {
+            let logical = window_start + offset;
+            let is_new = !known.contains_key(id);
+            match (range_start, is_new) {
+                (None, true) => range_start = Some(logical),
+                (Some(start), false) => {
+                    self.state.remeasure_items(start..logical);
+                    range_start = None;
+                }
+                _ => {}
+            }
+        }
+        if let Some(start) = range_start {
+            self.state
+                .remeasure_items(start..window_start + child_ids.len());
+        }
     }
 }

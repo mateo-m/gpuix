@@ -2,6 +2,7 @@
 
 export {
   App,
+  browserRendererAsTest,
   connectStdio,
   connectTest,
   handleAutomationRequest,
@@ -14,7 +15,10 @@ export {
 } from "./client.js"
 export type {
   AutomationBackend,
+  DragOptions,
   LiveAutomationRenderer,
+  MouseOptions,
+  PointTarget,
   TestAutomationRenderer,
 } from "./client.js"
 export {

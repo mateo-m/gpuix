@@ -16,7 +16,7 @@ import {
   hasNativeTestRenderer,
   readMacCpuThrottle,
   type TestRoot,
-} from '@gpuix/react'
+} from '@gpuix/react/testing'
 import { connectTest } from '@gpuix/react/automation'
 import { ChatApp } from './chat'
 
@@ -29,12 +29,20 @@ const WHEEL_X = 700
 const WHEEL_Y = 400
 
 const BUDGET = {
-  mountMs: 150,
+  // `<code>` paints no card, so the chat draws its own wrapper, header strip
+  // and language label: three extra host nodes per code turn, about 6ms over
+  // 1000 turns. Chrome costs React nodes now, and that is the whole point.
+  mountMs: 170,
   idleP95Ms: 8,
   idleMaxMs: 16,
   wheelP95Ms: 8,
   wheelMaxMs: 16,
   sidebarMs: 40,
+  // A root-scoped query over 1000 turns, AFTER the first query paid for the
+  // collect + fold. Low enough that keying the group cache on the wrong
+  // revision (which re-walks every node per keystroke) fails immediately.
+  highlightP95Ms: 12,
+  highlightMaxMs: 25,
 }
 
 function percentile(sorted: number[], p: number): number {
@@ -70,13 +78,14 @@ function expectBudget(args: {
   maxMax: number
 }) {
   const stats = report(args.label, args.samples)
-  if (throttle) return
+  if (throttle) return stats
   expect(stats.p95, `${args.label} p95 ${stats.p95.toFixed(2)}ms exceeds ${args.p95Max}ms`).toBeLessThan(
     args.p95Max,
   )
   expect(stats.max, `${args.label} max ${stats.max.toFixed(2)}ms exceeds ${args.maxMax}ms`).toBeLessThan(
     args.maxMax,
   )
+  return stats
 }
 
 function sampleFlushes(args: {
@@ -117,7 +126,7 @@ describeNative('chat performance', () => {
         BUDGET.mountMs,
       )
     }
-  })
+  }, 60_000)
 
   it('keeps idle flush and wheel draw under budget', () => {
     const { render, renderer } = createTestRoot()
@@ -155,7 +164,61 @@ describeNative('chat performance', () => {
       `[chat.perf] overlay p90=${overlay.p90Ms?.toFixed(2)}ms max=${overlay.maxMs?.toFixed(2)}ms samples=${overlay.samples}`,
     )
     expect(overlay.samples).toBeGreaterThan(0)
-  })
+  }, 60_000)
+
+  // A COARSE budget for the find-bar path, nothing more.
+  //
+  // It does NOT prove the two-level cache works. Measured: breaking the cache
+  // (keying the group list on `subtree_revision` instead of `search_revision`)
+  // moves a keystroke from 1.9ms to 2.7ms here, well inside any sane budget,
+  // because most of this chat's text lives in native `<code>` / `<diff>` /
+  // `<markdown>` props rather than retained `<text>` nodes.
+  //
+  // The proof is `highlight_cache_tests` in `packages/native/src/renderer.rs`,
+  // which compares Arc identity and fails outright when the cache is broken.
+  it('keeps a highlight query change under budget', () => {
+    const { render, renderer } = createTestRoot()
+    const app = (query: string, activeIndex = 0) => (
+      <div style={{ flex: 1 }} highlight={query ? { query, activeIndex } : null}>
+        <ChatApp turnCount={TURNS} includeSafeMdx />
+      </div>
+    )
+    render(app(''))
+    sampleFlushes({ renderer, count: WARMUP })
+
+    // First query: collects and folds the subtree once. Not measured.
+    render(app('p'))
+
+    const word = 'performance of the renderer'
+    const keystrokes: number[] = []
+    for (let i = 2; i <= word.length; i++) {
+      const start = performance.now()
+      render(app(word.slice(0, i)))
+      keystrokes.push(performance.now() - start)
+    }
+    const keystroke = expectBudget({
+      label: 'highlight keystroke',
+      samples: keystrokes,
+      p95Max: BUDGET.highlightP95Ms,
+      maxMax: BUDGET.highlightMaxMs,
+    })
+
+    // Moving the find cursor changes no text and no matcher, so it must never
+    // cost more than a keystroke.
+    const cursor: number[] = []
+    for (let i = 0; i < 20; i++) {
+      const start = performance.now()
+      render(app(word, i))
+      cursor.push(performance.now() - start)
+    }
+    const stats = report('highlight cursor', cursor)
+    if (throttle) return
+    expect(
+      stats.p50,
+      `cursor move ${stats.p50.toFixed(2)}ms should not exceed a keystroke ` +
+        `(${keystroke.p50.toFixed(2)}ms); it must not rescan text`,
+    ).toBeLessThan(Math.max(keystroke.p50 * 2, 4))
+  }, 60_000)
 
   it('keeps a sidebar click under budget', async () => {
     const { render, renderer } = createTestRoot()
@@ -180,5 +243,5 @@ describeNative('chat performance', () => {
         `sidebar click ${stats.max.toFixed(1)}ms exceeds ${BUDGET.sidebarMs}ms`,
       ).toBeLessThan(BUDGET.sidebarMs)
     }
-  })
+  }, 60_000)
 })
