@@ -145,7 +145,7 @@ export function Gradients() {
       />
       <List
         title="Easing"
-        note="An easing function between two stops bends the mix. CSS has no such thing yet, so this follows the CSSWG proposal (issue 1332). A straight fade to transparent looks dense near the solid stop and thin near the clear one; an eased one reads as one smooth fall-off."
+        note="An easing function between two stops bends the mix. CSS has no such thing yet, so this follows the CSSWG proposal (issue 1332). A straight fade to transparent looks dense near the solid stop and thin near the clear one. An eased one reads as one smooth fall-off."
         entries={EASING}
       />
       <StickyHeader />

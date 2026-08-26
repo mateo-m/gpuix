@@ -171,7 +171,10 @@ export function resetRender(): void {
 
 /** Mount the app. Under `bun --hot`, later calls remount on the same native window. */
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
+  // resolveClassName reaches createRoot through `options`. The destructure
+  // only keeps it out of `windowOptions`, which goes to the native window.
   const { onEvent, renderer: injected, debugFrameOverlay, resolveClassName, ...windowOptions } = options
+  void resolveClassName
   const slot = renderSlot()
   const remount = slot.root != null
   slot.onEvent = onEvent

@@ -563,7 +563,7 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getSelectedText()
   }
 
-  /// The text on the clipboard after a copy, or null when nothing text is there.
+  /// The text on the clipboard after a copy, or null when the clipboard has no text.
   readClipboardText(): string | null {
     return this.native.readClipboardText()
   }
