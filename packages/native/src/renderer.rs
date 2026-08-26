@@ -601,18 +601,33 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         .unwrap_or_else(|| "unknown panic".to_string())
 }
 
-/// Copies one `process.env` entry into the real process environment.
+/// JS-side values for environment overrides such as `GPUIX_SCROLLBARS`.
 ///
-/// Rust reads overrides such as `GPUIX_SCROLLBARS` with `std::env::var`,
-/// which reads the C environment. Node writes a `process.env` assignment
-/// through to `setenv`, but Bun only updates its JS snapshot. A caller on
-/// Bun must push the value across with this function.
+/// A map instead of `std::env::set_var`, because `setenv` races `getenv`
+/// on another thread, and Windows and Linux paint on a dedicated UI thread.
+fn env_overrides() -> &'static std::sync::Mutex<HashMap<String, Option<String>>> {
+    static OVERRIDES: std::sync::OnceLock<std::sync::Mutex<HashMap<String, Option<String>>>> =
+        std::sync::OnceLock::new();
+    OVERRIDES.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+/// Reads an override, or the real process environment when JS never set one.
+pub(crate) fn env_var(key: &str) -> Option<String> {
+    if let Some(value) = env_overrides().lock().unwrap().get(key) {
+        return value.clone();
+    }
+    std::env::var(key).ok()
+}
+
+/// Records one `process.env` entry for `env_var` readers.
+///
+/// Rust reads overrides such as `GPUIX_SCROLLBARS` at paint. Node writes a
+/// `process.env` assignment through to `setenv`, but Bun only updates its
+/// JS snapshot. A caller on Bun must push the value across with this
+/// function.
 #[napi]
 pub fn sync_env_var(key: String, value: Option<String>) {
-    match value {
-        Some(value) => std::env::set_var(key, value),
-        None => std::env::remove_var(key),
-    }
+    env_overrides().lock().unwrap().insert(key, value);
 }
 
 /// The main GPUI renderer exposed to Node.js.
