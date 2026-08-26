@@ -3,6 +3,11 @@
   // test files there carry type errors that predate this config. `files`
   // survives `exclude`, so this config adds back the files whose whole purpose
   // is to be typechecked.
+  //
+  // The `typecheck` script builds first. `jsx-runtime.d.ts` imports the tag
+  // props from `./dist/types/host.js`, and with no `dist` the import resolves
+  // to `any` under `skipLibCheck`. Every `@ts-expect-error` on a rejected
+  // prop then fails with TS2578.
   "extends": "./tsconfig.json",
   "compilerOptions": { "noEmit": true },
   "files": [
