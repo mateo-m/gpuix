@@ -80,6 +80,32 @@ function expectColorsEqual(name: string, input: string, expected: string) {
   expectScreenshotsEqual(actualPath, expectedPath)
 }
 
+/// Paint `color` over a white parent and read one pixel. The window itself is
+/// black, and translucent black over black is black, so alpha only shows over
+/// an explicit light background.
+function paintedPixel(color: string) {
+  const testRoot = createTestRoot()
+  testRoot.render(
+    <div style={{ width: "100%", height: "100%", backgroundColor: "#ffffff" }}>
+      <div style={{ width: "100%", height: "100%", backgroundColor: color }} />
+    </div>
+  )
+  return testRoot.renderer.pixelAt(2, 2)
+}
+
+/// lightningcss keeps the alpha of `rgb()`, `hsl()` and `hwb()` in 8 bits, so
+/// 50% comes back as 128/255. The wider spaces keep the exact float 0.5. Over
+/// white, the first paints 127 and the second 128, and which side of the
+/// boundary the GPU takes differs between Metal and Direct3D. So this allows
+/// one 8-bit step, the same tolerance the engine colour tests use.
+function expectColorsClose(input: string, expected: string) {
+  const actual = paintedPixel(input)
+  const reference = paintedPixel(expected)
+  for (let channel = 0; channel < 4; channel++) {
+    expect(Math.abs(actual[channel]! - reference[channel]!)).toBeLessThanOrEqual(1)
+  }
+}
+
 describeNative("native color functions", () => {
   it.each(absoluteCases)(
     "paints absolute %s exactly like its canonical hex",
@@ -88,9 +114,12 @@ describeNative("native color functions", () => {
     }
   )
 
-  it.each(alphaCases)("paints %s alpha exactly like 50% black", (name, input) => {
-    expectColorsEqual(`color-alpha-${name}`, input, "rgba(0 0 0 / 50%)")
-  })
+  it.each(alphaCases)(
+    "paints %s alpha like 50% black within one 8-bit step",
+    (_name, input) => {
+      expectColorsClose(input, "rgba(0 0 0 / 50%)")
+    }
+  )
 
   it.each(relativeCases)(
     "paints relative %s exactly like its expected hex",
