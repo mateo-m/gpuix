@@ -294,17 +294,17 @@ export interface StyleDesc {
   scrollbarGutter?: string
   /** Space scrollIntoView keeps around this element, a number of pixels
    *  or "Npx", alone or as the CSS one-to-four shorthand. */
-  scrollMargin?: number | string
-  scrollMarginTop?: number | string
-  scrollMarginRight?: number | string
-  scrollMarginBottom?: number | string
-  scrollMarginLeft?: number | string
+  scrollMargin?: Numeric
+  scrollMarginTop?: Numeric
+  scrollMarginRight?: Numeric
+  scrollMarginBottom?: Numeric
+  scrollMarginLeft?: Numeric
   /** Space scrollIntoView keeps inside this scroll box. */
-  scrollPadding?: number | string
-  scrollPaddingTop?: number | string
-  scrollPaddingRight?: number | string
-  scrollPaddingBottom?: number | string
-  scrollPaddingLeft?: number | string
+  scrollPadding?: Numeric
+  scrollPaddingTop?: Numeric
+  scrollPaddingRight?: Numeric
+  scrollPaddingBottom?: Numeric
+  scrollPaddingLeft?: Numeric
   /** `auto`, `contain` or `none`, one word for both axes or two with the x
    *  axis first. A scroll box keeps a wheel event it can scroll with. At its
    *  end, `auto` hands the event to the nearest scroll box around it and
