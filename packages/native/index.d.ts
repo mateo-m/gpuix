@@ -443,6 +443,16 @@ export interface EventPayload {
   modifiers?: EventModifiers
 }
 
+/**
+ * Copies one `process.env` entry into the real process environment.
+ *
+ * Rust reads overrides such as `GPUIX_SCROLLBARS` with `std::env::var`,
+ * which reads the C environment. Node writes a `process.env` assignment
+ * through to `setenv`, but Bun only updates its JS snapshot. A caller on
+ * Bun must push the value across with this function.
+ */
+export declare function syncEnvVar(key: string, value?: string | undefined | null): void
+
 export interface WindowOptions {
   title?: string
   width?: number
