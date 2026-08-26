@@ -8,77 +8,6 @@
 import React from "react"
 import { Grid, Panel, Sample, Swatch } from "./ui.js"
 
-/// A sticky header over scrolling rows, with a progressive blur under it.
-///
-/// The header box has `backdropFilter: blur() saturate()`, which blurs the
-/// rows under it the way the iOS 26 navigation bar does, and a `maskImage`
-/// gradient that fades that blur out toward the bottom of the box. The
-/// easing on the mask keeps the fall-off smooth. There is no scrim, only a
-/// faint tint at the top so the large title stays readable over bright
-/// rows. `overscrollBehavior: "contain"` keeps the wheel inside the list,
-/// so the page does not move with it.
-export function StickyHeader() {
-  const rows = Array.from({ length: 40 }, (_, i) => `Row ${i + 1}`)
-  return (
-    <Panel
-      title="Sticky header with a progressive blur"
-      note="Scroll the list. The header blurs what passes under it, and a gradient mask fades the blur out, so rows melt into the header instead of stopping at a line. The wheel stays inside the list.">
-      <div style={{ position: "relative", height: 280, width: 320, borderRadius: 24, overflow: "hidden", backgroundColor: "#0f1115" }}>
-        <div
-          style={{
-            height: 280,
-            overflowY: "scroll",
-            overscrollBehavior: "contain",
-            display: "flex",
-            flexDirection: "column",
-            gap: 8,
-            padding: 12,
-            paddingTop: 96,
-          }}>
-          {rows.map((row, i) => (
-            <div
-              key={row}
-              style={{
-                height: 44,
-                borderRadius: 12,
-                backgroundColor: i % 3 === 0 ? "#3d8bfd" : "#1c1f26",
-                padding: 12,
-              }}>
-              <text style={{ color: i % 3 === 0 ? "#ffffff" : "#e6e9ef", fontSize: 15 }}>{row}</text>
-            </div>
-          ))}
-        </div>
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 120,
-            pointerEvents: "none",
-            backdropFilter: "blur(40px) saturate(180%)",
-            maskImage: "linear-gradient(to bottom, black 30%, ease-in-out, transparent)",
-          }}
-        />
-        <div
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            right: 0,
-            height: 96,
-            paddingTop: 18,
-            paddingLeft: 20,
-            pointerEvents: "none",
-            backgroundImage: "linear-gradient(to bottom, rgb(15 17 21 / 0.6), ease-out, transparent)",
-          }}>
-          <text style={{ color: "#ffffff", fontWeight: 700, fontSize: 30 }}>Inbox</text>
-        </div>
-      </div>
-    </Panel>
-  )
-}
-
 const DIRECTIONS: Array<[string, string]> = [
   ["linear-gradient(#ff5c8a, #5cc8ff)", "top to bottom, the default"],
   ["linear-gradient(to right, #ff5c8a, #5cc8ff)", "a side keyword"],
@@ -145,13 +74,12 @@ export function Gradients() {
       />
       <List
         title="Easing"
-        note="An easing function between two stops bends the mix. CSS has no such thing yet, so this follows the CSSWG proposal (issue 1332). A straight fade to transparent looks dense near the solid stop and thin near the clear one; an eased one reads as one smooth fall-off."
+        note="An easing function between two stops bends the mix. CSS has no such thing yet, so this follows the CSSWG proposal (issue 1332). A straight fade to transparent looks dense near the solid stop and thin near the clear one. An eased one reads as one smooth fall-off."
         entries={EASING}
       />
-      <StickyHeader />
       <List
         title="Alpha"
-        note="A stop can be see-through. The gradient paints over the backgroundColor of the same box, and where both are clear the parent shows through."
+        note="A stop can be see-through. A backgroundImage replaces the backgroundColor of the same box, and where the gradient is clear the parent shows through."
         entries={ALPHA}
       />
     </div>
