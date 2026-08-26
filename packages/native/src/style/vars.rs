@@ -155,6 +155,40 @@ impl<'a> Scope<'a> {
         Some(reading.fill)
     }
 
+    /// The blur and colour matrix a `filter` or `backdrop-filter` names.
+    ///
+    /// `None` for `none`, and for a list this build cannot paint, such as
+    /// one with `drop-shadow()`.
+    pub fn filter(&self, text: &str) -> Option<gpuix_css::effects::Filter> {
+        let text = self.value(text)?;
+        gpuix_css::effects::filter(&text).ok()?
+    }
+
+    /// The blend mode a `mix-blend-mode` or `background-blend-mode` names.
+    pub fn blend_mode(&self, text: &str) -> Option<gpui::BlendMode> {
+        use gpuix_css::effects::BlendMode as Css;
+        let text = self.value(text)?;
+        Some(match gpuix_css::effects::blend_mode(&text).ok()? {
+            Css::Normal => gpui::BlendMode::Normal,
+            Css::Multiply => gpui::BlendMode::Multiply,
+            Css::Screen => gpui::BlendMode::Screen,
+            Css::Overlay => gpui::BlendMode::Overlay,
+            Css::Darken => gpui::BlendMode::Darken,
+            Css::Lighten => gpui::BlendMode::Lighten,
+            Css::ColorDodge => gpui::BlendMode::ColorDodge,
+            Css::ColorBurn => gpui::BlendMode::ColorBurn,
+            Css::HardLight => gpui::BlendMode::HardLight,
+            Css::SoftLight => gpui::BlendMode::SoftLight,
+            Css::Difference => gpui::BlendMode::Difference,
+            Css::Exclusion => gpui::BlendMode::Exclusion,
+            Css::Hue => gpui::BlendMode::Hue,
+            Css::Saturation => gpui::BlendMode::Saturation,
+            Css::Color => gpui::BlendMode::Color,
+            Css::Luminosity => gpui::BlendMode::Luminosity,
+            Css::PlusLighter => gpui::BlendMode::PlusLighter,
+        })
+    }
+
     /// Whether resolving read a variable.
     pub fn used_a_variable(&self) -> bool {
         self.used.get()
@@ -425,23 +459,77 @@ mod tests {
     #[test]
     fn current_color_names_the_computed_colour() {
         let variables = scope_of(&[]);
-        let scope = Scope::new(&variables, Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }, false, 16.0);
-        assert_eq!(scope.color("currentColor"), Some(Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }));
-        assert_eq!(scope.color("CURRENTCOLOR"), Some(Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }));
+        let scope = Scope::new(
+            &variables,
+            Rgba {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            false,
+            16.0,
+        );
+        assert_eq!(
+            scope.color("currentColor"),
+            Some(Rgba {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0
+            })
+        );
+        assert_eq!(
+            scope.color("CURRENTCOLOR"),
+            Some(Rgba {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0
+            })
+        );
         assert!(scope.used_a_variable());
     }
 
     #[test]
     fn a_variable_may_hold_the_current_colour_keyword() {
         let variables = scope_of(&[("--edge", "currentColor")]);
-        let scope = Scope::new(&variables, Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }, false, 16.0);
-        assert_eq!(scope.color("var(--edge)"), Some(Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }));
+        let scope = Scope::new(
+            &variables,
+            Rgba {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            false,
+            16.0,
+        );
+        assert_eq!(
+            scope.color("var(--edge)"),
+            Some(Rgba {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0
+            })
+        );
     }
 
     #[test]
     fn an_ordinary_colour_does_not_read_the_scope() {
         let variables = scope_of(&[]);
-        let scope = Scope::new(&variables, Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 }, false, 16.0);
+        let scope = Scope::new(
+            &variables,
+            Rgba {
+                r: 1.0,
+                g: 0.0,
+                b: 0.0,
+                a: 1.0,
+            },
+            false,
+            16.0,
+        );
         assert_eq!(
             scope.color("#00ff00"),
             gpuix_css::color::color("#00ff00", &Default::default()).ok()

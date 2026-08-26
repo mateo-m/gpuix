@@ -128,9 +128,36 @@ export interface StyleDesc {
    *  win over it. */
   background?: string
   backgroundColor?: string
-  /** A `linear-gradient()` or `none`. Wins over `backgroundColor`, since a
-   *  box paints one fill. Stop positions are percentages. */
+  /** A `linear-gradient()` or `none`, painted over `backgroundColor` the
+   *  way a browser paints it. Stop positions are percentages.
+   *
+   *  An easing function between two stops bends the mix, which CSS cannot
+   *  do yet: `linear-gradient(to top, black, ease-in-out, transparent)`.
+   *  Takes `ease`, `ease-in`, `ease-out`, `ease-in-out` or `cubic-bezier()`,
+   *  following csswg-drafts issue 1332. A straight mix looks dense near the
+   *  solid stop and thin near the clear one, and an eased scrim does not. */
   backgroundImage?: string
+  /** How `backgroundImage` mixes with `backgroundColor`: any CSS
+   *  `<blend-mode>` except `plus-darker`. */
+  backgroundBlendMode?: string
+  /** How the element and its children mix with what is under them: any CSS
+   *  `<blend-mode>` except `plus-darker`. */
+  mixBlendMode?: string
+  /** A CSS filter list on the element and its children, or `none`. `blur()`,
+   *  `brightness()`, `contrast()`, `grayscale()`, `hue-rotate()`, `invert()`,
+   *  `opacity()`, `saturate()` and `sepia()` are painted. `drop-shadow()`
+   *  and `url()` drop the whole property. The functions other than `blur()`
+   *  fold into one colour matrix, so a long list costs one pass. */
+  filter?: string
+  /** The same list applied to what is under the element, clipped to its
+   *  corners like CSS `backdrop-filter`. */
+  backdropFilter?: string
+  /** A `linear-gradient()` whose alpha keeps or drops each pixel of the
+   *  element and its children, over the border box. Over a `backdropFilter`
+   *  blur the alpha scales the blur radius instead, unlike CSS, which fades
+   *  a sharp copy over the blur. Add an easing between the stops for a
+   *  progressive blur under a header. */
+  maskImage?: string
   color?: string
   opacity?: number
 

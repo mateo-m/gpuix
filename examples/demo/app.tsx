@@ -12,6 +12,7 @@ import { ClassNames } from "./class-names.js"
 import { Colors } from "./colors.js"
 import { Gradients } from "./gradients.js"
 import { Corners } from "./corners.js"
+import { Effects } from "./effects.js"
 import { Inheritance } from "./inheritance.js"
 import { Lengths } from "./lengths.js"
 import { Motion } from "./motion-panel.js"
@@ -69,6 +70,7 @@ const SECTIONS = [
   { id: "colors", title: "Colours", render: () => <Colors /> },
   { id: "gradients", title: "Gradients", render: () => <Gradients /> },
   { id: "corners", title: "Corner shape", render: () => <Corners /> },
+  { id: "effects", title: "Effects", render: () => <Effects /> },
   { id: "lengths", title: "Lengths", render: () => <Lengths /> },
   { id: "variables", title: "Variables", render: () => <Variables /> },
   { id: "inheritance", title: "Inheritance", render: () => <Inheritance /> },

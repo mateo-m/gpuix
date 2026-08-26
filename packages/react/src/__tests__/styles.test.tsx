@@ -1978,6 +1978,115 @@ describeNative("motion", () => {
     expect(renderer.pixelAt(208, 80)[2]).toBeGreaterThan(220)
   })
 
+  it("blurs the picture of an element", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 40, padding: 40, backgroundColor: "#000000" }}>
+        <div style={{ width: 100, height: 100, backgroundColor: "#ff0000" }} />
+        <div style={{ width: 100, height: 100, backgroundColor: "#ff0000", filter: "blur(8px)" }} />
+      </div>
+    )
+    // The sharp box ends at x = 140. The blurred one starts at x = 180: its
+    // edge is half red and it bleeds red past the box, while its middle
+    // stays fully red.
+    expect(renderer.pixelAt(139, 90)[0]).toBeGreaterThan(240)
+    expect(renderer.pixelAt(146, 90)[0]).toBeLessThan(15)
+    const [edgeR] = renderer.pixelAt(180, 90)
+    expect(edgeR).toBeGreaterThan(80)
+    expect(edgeR).toBeLessThan(180)
+    expect(renderer.pixelAt(172, 90)[0]).toBeGreaterThan(15)
+    expect(renderer.pixelAt(230, 90)[0]).toBeGreaterThan(240)
+  })
+
+  it("runs the picture of an element through the filter functions", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 10, padding: 10 }}>
+        <div style={{ width: 60, height: 60, backgroundColor: "#ff0000", filter: "grayscale(1)" }} />
+        <div style={{ width: 60, height: 60, backgroundColor: "#ffffff", filter: "invert(1)" }} />
+        <div style={{ width: 60, height: 60, backgroundColor: "#ff0000", filter: "hue-rotate(120deg)" }} />
+      </div>
+    )
+    const [gr, gg, gb] = renderer.pixelAt(40, 40)
+    expect(Math.abs(gr - gg)).toBeLessThan(6)
+    expect(Math.abs(gg - gb)).toBeLessThan(6)
+    expect(renderer.pixelAt(110, 40)[0]).toBeLessThan(15)
+    const [hr, hg] = renderer.pixelAt(180, 40)
+    expect(hg).toBeGreaterThan(hr + 100)
+  })
+
+  it("masks an element with a gradient", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ padding: 10, backgroundColor: "#000000" }}>
+        <div style={{ width: 200, height: 40, backgroundColor: "#ff0000", maskImage: "linear-gradient(to right, black, transparent)" }} />
+      </div>
+    )
+    expect(renderer.pixelAt(12, 30)[0]).toBeGreaterThan(240)
+    const [midR] = renderer.pixelAt(110, 30)
+    expect(midR).toBeGreaterThan(90)
+    expect(midR).toBeLessThan(170)
+    expect(renderer.pixelAt(208, 30)[0]).toBeLessThan(20)
+  })
+
+  it("blends an element with what is under it", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "row", gap: 10, padding: 10 }}>
+        <div style={{ width: 60, height: 60, backgroundColor: "#00ffff" }}>
+          <div style={{ width: 60, height: 60, backgroundColor: "#ffff00", mixBlendMode: "multiply" }} />
+        </div>
+        <div style={{ width: 60, height: 60, backgroundColor: "#00ffff" }}>
+          <div style={{ width: 60, height: 60, backgroundColor: "#ffff00" }} />
+        </div>
+        <div style={{ width: 60, height: 60, backgroundColor: "#00ffff", backgroundImage: "linear-gradient(#ffff00, #ffff00)", backgroundBlendMode: "multiply" }} />
+      </div>
+    )
+    // Yellow times cyan is green. Without the mode, yellow covers cyan.
+    const [r, g, b] = renderer.pixelAt(40, 40)
+    expect(r).toBeLessThan(15)
+    expect(g).toBeGreaterThan(240)
+    expect(b).toBeLessThan(15)
+    const [plainR, plainG] = renderer.pixelAt(110, 40)
+    expect(plainR).toBeGreaterThan(240)
+    expect(plainG).toBeGreaterThan(240)
+    const [bgR, bgG, bgB] = renderer.pixelAt(180, 40)
+    expect(bgR).toBeLessThan(15)
+    expect(bgG).toBeGreaterThan(240)
+    expect(bgB).toBeLessThan(15)
+  })
+
+  it("paints the background image over the background colour", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ padding: 10 }}>
+        <div style={{ width: 200, height: 40, backgroundColor: "#0000ff", backgroundImage: "linear-gradient(to right, #ff0000, transparent)" }} />
+      </div>
+    )
+    // Red at the left, and the blue shows through where the gradient clears.
+    expect(renderer.pixelAt(12, 30)[0]).toBeGreaterThan(240)
+    expect(renderer.pixelAt(208, 30)[2]).toBeGreaterThan(240)
+  })
+
+  it("blurs what is under an element", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ position: "relative", width: 300, height: 200, backgroundColor: "#000000" }}>
+        <div style={{ position: "absolute", left: 100, top: 0, width: 100, height: 200, backgroundColor: "#ff0000" }} />
+        <div style={{ position: "absolute", left: 0, top: 100, width: 300, height: 100, backdropFilter: "blur(12px)" }} />
+      </div>
+    )
+    // Above the glass the red edge at x = 100 is sharp. Under it the edge
+    // spreads over the black on both sides.
+    expect(renderer.pixelAt(96, 50)[0]).toBeLessThan(15)
+    expect(renderer.pixelAt(104, 50)[0]).toBeGreaterThan(240)
+    expect(renderer.pixelAt(92, 150)[0]).toBeGreaterThan(20)
+    const [underEdgeR] = renderer.pixelAt(100, 150)
+    expect(underEdgeR).toBeGreaterThan(70)
+    expect(underEdgeR).toBeLessThan(190)
+    expect(renderer.pixelAt(150, 150)[0]).toBeGreaterThan(240)
+  })
+
   it("cuts corners to the declared shape", () => {
     const { render, renderer } = createTestRoot()
     const box = { width: 100, height: 100, backgroundColor: "#ff0000" }

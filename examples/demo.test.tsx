@@ -14,6 +14,7 @@ import type { TestRoot } from "@gpuix/react"
 import { App, BASE, PALETTES } from "./demo/app"
 import { ClassNames } from "./demo/class-names"
 import { Colors } from "./demo/colors"
+import { Effects } from "./demo/effects"
 import { Gradients } from "./demo/gradients"
 import { Inheritance } from "./demo/inheritance"
 import { Lengths } from "./demo/lengths"
@@ -33,6 +34,7 @@ function root(): TestRoot {
 const PANELS = [
   ["colors", <Colors />],
   ["gradients", <Gradients />],
+  ["effects", <Effects />],
   ["lengths", <Lengths />],
   ["variables", <Variables />],
   ["inheritance", <Inheritance />],
