@@ -148,12 +148,16 @@ async function compileBinary(withIcon: boolean): Promise<void> {
   }
   if (WINDOWS) {
     compile.windows = {
-      icon: withIcon && process.platform === 'win32' ? ICO : undefined,
       hideConsole: true,
       title: APP_NAME,
       publisher: 'GPUIX',
       version: '0.1.0',
       description: `${APP_NAME}, a desktop app built with GPUIX`,
+    }
+    // Only set the key when the file exists. Bun rejects `icon: undefined`
+    // with "windows.icon must be a valid path to an ico file".
+    if (withIcon && process.platform === 'win32' && existsSync(ICO)) {
+      compile.windows.icon = ICO
     }
   }
 
