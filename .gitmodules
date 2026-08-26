@@ -1,4 +1,4 @@
 [submodule "zed"]
 	path = zed
 	url = git@github.com:mateo-m/zed.git
-	branch = gpui-isolated-layout
+	branch = gpui-effect-layers

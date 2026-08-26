@@ -8,9 +8,11 @@
     "noImplicitAny": false,
     "skipLibCheck": true,
     "noEmit": true,
-    // The workspace hoists @types/node under packages/react.
-    "typeRoots": ["../packages/react/node_modules/@types"],
-    "types": ["node"]
+    // The workspace hoists @types/node under packages/react. @types/bun is a
+    // root devDependency: it types `Bun.serve` and the `*.html` import that the
+    // dev server uses as its bundler entry.
+    "typeRoots": ["../packages/react/node_modules/@types", "../node_modules/@types"],
+    "types": ["node", "bun"]
   },
   "include": ["*.ts"]
 }

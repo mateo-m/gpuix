@@ -583,6 +583,41 @@ pub fn should_occlude(style: &StyleDesc) -> bool {
     }
 }
 
+/// Map a CSS `cursor` keyword onto a GPUI cursor. Unknown keywords return
+/// `None` so the property is ignored, like every other invalid style value.
+///
+/// `ResizeUpLeftDownRight` is the NorthWest/SouthEast cursor on every backend,
+/// so it is `nwse-resize`. GPUI's doc comments and its browser backend named
+/// the opposite CSS values until the pinned fork corrected them, so do not
+/// "fix" this pair back by reading an older GPUI.
+pub fn parse_cursor(name: &str) -> Option<gpui::CursorStyle> {
+    use gpui::CursorStyle;
+    Some(match name {
+        "default" | "auto" => CursorStyle::Arrow,
+        "pointer" => CursorStyle::PointingHand,
+        "text" => CursorStyle::IBeam,
+        "vertical-text" => CursorStyle::IBeamCursorForVerticalLayout,
+        "crosshair" => CursorStyle::Crosshair,
+        "grab" => CursorStyle::OpenHand,
+        "grabbing" | "move" | "all-scroll" => CursorStyle::ClosedHand,
+        "col-resize" => CursorStyle::ResizeColumn,
+        "row-resize" => CursorStyle::ResizeRow,
+        "ew-resize" => CursorStyle::ResizeLeftRight,
+        "ns-resize" => CursorStyle::ResizeUpDown,
+        "nwse-resize" | "nw-resize" | "se-resize" => CursorStyle::ResizeUpLeftDownRight,
+        "nesw-resize" | "ne-resize" | "sw-resize" => CursorStyle::ResizeUpRightDownLeft,
+        "w-resize" => CursorStyle::ResizeLeft,
+        "e-resize" => CursorStyle::ResizeRight,
+        "n-resize" => CursorStyle::ResizeUp,
+        "s-resize" => CursorStyle::ResizeDown,
+        "not-allowed" | "no-drop" => CursorStyle::OperationNotAllowed,
+        "alias" => CursorStyle::DragLink,
+        "copy" => CursorStyle::DragCopy,
+        "context-menu" => CursorStyle::ContextualMenu,
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -704,6 +739,21 @@ mod tests {
         };
         let text = serde_json::to_string(&style).unwrap();
         assert_eq!(serde_json::from_str::<StyleDesc>(&text).unwrap(), style);
+    }
+
+    #[test]
+    fn maps_the_timeline_cursors() {
+        assert_eq!(parse_cursor("col-resize"), Some(gpui::CursorStyle::ResizeColumn));
+        assert_eq!(parse_cursor("grab"), Some(gpui::CursorStyle::OpenHand));
+        assert_eq!(parse_cursor("grabbing"), Some(gpui::CursorStyle::ClosedHand));
+        assert_eq!(parse_cursor("pointer"), Some(gpui::CursorStyle::PointingHand));
+        assert_eq!(parse_cursor("default"), Some(gpui::CursorStyle::Arrow));
+    }
+
+    #[test]
+    fn ignores_an_unknown_cursor() {
+        assert_eq!(parse_cursor("zoom-in"), None);
+        assert_eq!(parse_cursor("POINTER"), None);
     }
 }
 
