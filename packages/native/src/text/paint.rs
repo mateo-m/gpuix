@@ -562,11 +562,19 @@ pub fn range_rects(
     // Walk the range one visual row at a time: binary search for the furthest
     // index that still sits on the current row.
     let mut guard = 0;
+    let mut row_is_continuation = false;
     while cur < range.end && guard < 256 {
         guard += 1;
-        let Some(p1) = layout.position_for_index(cur) else {
+        let Some(mut p1) = layout.position_for_index(cur) else {
             break;
         };
+        // A continuation row starts at the index AFTER the wrap boundary,
+        // because the boundary index reports its position on the earlier
+        // row. That index sits one glyph into the row, so the wash must
+        // stretch back to the row's leading edge or it misses that glyph.
+        if row_is_continuation {
+            p1.x = layout.bounds().origin.x;
+        }
         // `seg_end` closes the wash on this row; `next` is the first index on the
         // following row. They differ because a row-end index's position still
         // reports the earlier row, and we need strict progress.
@@ -599,6 +607,7 @@ pub fn range_rects(
             break;
         }
         cur = next;
+        row_is_continuation = true;
     }
     rects
 }
