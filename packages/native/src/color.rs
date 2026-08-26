@@ -52,6 +52,9 @@ pub(crate) fn to_background(fill: &gpuix_css::background::Fill) -> gpui::Backgro
                     color: to_hsla(stop.color),
                     percentage: stop.position,
                     hint: stop.hint,
+                    // The GPUI shader now solves the easing per fragment, so
+                    // the half-point hint approximation is gone.
+                    easing: stop.easing,
                 })
                 .collect();
             gpui::linear_gradient_stops(line, &stops)
@@ -236,5 +239,19 @@ mod tests {
             parse_color_hex("oklch(0.62796 0.25768 29.23388 / 50%)"),
             Some(u32::from(rgba))
         );
+    }
+
+    #[test]
+    fn an_easing_reaches_the_gpui_stop() {
+        let reading = gpuix_css::background::read(
+            "linear-gradient(to right, #ff0000, ease-in, #0000ff)",
+            &ColorContext::default(),
+        )
+        .expect("the gradient parses")
+        .expect("the value is not none");
+        let background = to_background(&reading.fill);
+        // GPUI keeps its stops private, so the check reads the Debug form.
+        let painted = format!("{background:?}");
+        assert!(painted.contains("easing: [0.42, 0.0, 1.0, 1.0]"), "{painted}");
     }
 }

@@ -106,11 +106,11 @@ export function Lengths() {
 
       <Panel
         title="Line height"
-        note="A bare number is a multiple of the font size, the way CSS reads it. At 16px these four all mean 25.6 pixels, and a line height of zero declares nothing."
+        note="A number is pixels. A bare number in a string is a multiple of the font size, the way CSS reads it. At 16px these four all mean 25.6 pixels, and a line height of zero declares nothing."
       >
         <Grid>
-          <Lines label="lineHeight: 1.6" hint="a multiple" declaration={{ lineHeight: 1.6 }} />
-          <Lines label='lineHeight: "1.6"' hint="the same, written as text" declaration={{ lineHeight: "1.6" }} />
+          <Lines label="lineHeight: 25.6" hint="pixels" declaration={{ lineHeight: 25.6 }} />
+          <Lines label='lineHeight: "1.6"' hint="the same, as a CSS multiple" declaration={{ lineHeight: "1.6" }} />
           <Lines label='lineHeight: "160%"' hint="the same multiple" declaration={{ lineHeight: "160%" }} />
           <Lines label='lineHeight: "1.6rem"' hint="25.6px at a 16px root" declaration={{ lineHeight: "1.6rem" }} />
           <Lines label="lineHeight: 0" hint="declares nothing" declaration={{ lineHeight: 0 }} />

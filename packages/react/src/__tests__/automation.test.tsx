@@ -65,4 +65,169 @@ describeNative("automation", () => {
     expect(fs.statSync(frames[1]).size).toBeGreaterThan(0)
     await app.close()
   })
+
+  it("drags a locator through interpolated moves", async () => {
+    const log: string[] = []
+
+    function Draggable() {
+      const [x, setX] = useState(20)
+      const [origin, setOrigin] = useState<{ pointer: number; box: number } | null>(
+        null
+      )
+      return (
+        <div style={{ width: 600, height: 200, position: "relative" }}>
+          <div
+            testId="handle"
+            style={{
+              position: "absolute",
+              left: x,
+              top: 40,
+              width: 80,
+              height: 40,
+              backgroundColor: "#3366ff",
+            }}
+            onMouseDown={(event) => {
+              log.push("down")
+              setOrigin({ pointer: event.x ?? 0, box: x })
+            }}
+            onMouseMove={(event) => {
+              if (!origin) return
+              log.push("move")
+              setX(origin.box + (event.x ?? 0) - origin.pointer)
+            }}
+            onMouseUp={() => {
+              log.push("up")
+              setOrigin(null)
+            }}
+          >
+            <text>{`x=${Math.round(x)}`}</text>
+          </div>
+        </div>
+      )
+    }
+
+    const { render, renderer } = createTestRoot()
+    render(<Draggable />)
+    const app = await connectTest(renderer)
+
+    await app.getByTestId("handle").dragBy(200, 0, { steps: 4 })
+
+    expect(log).toEqual(["down", "move", "move", "move", "move", "up"])
+    expect(renderer.getAllText()).toEqual(["x=220"])
+
+    const bounds = await app.getByTestId("handle").bounds()
+    expect(Math.round(bounds.x)).toBe(220)
+    await app.close()
+  })
+
+  it("sends the button a click asks for", async () => {
+    const seen: Array<{ button?: number; click?: boolean; aux?: boolean }> = []
+
+    function Target() {
+      return (
+        <div
+          testId="target"
+          style={{ width: 200, height: 80, backgroundColor: "#101010" }}
+          onMouseDown={(event) => seen.push({ button: event.button })}
+          onClick={(event) => seen.push({ click: event.isRightClick })}
+          onAuxClick={(event) => seen.push({ aux: event.isRightClick })}
+        >
+          <text>target</text>
+        </div>
+      )
+    }
+
+    const { render, renderer } = createTestRoot()
+    render(<Target />)
+    const app = await connectTest(renderer)
+
+    await app.getByTestId("target").click()
+    await app.getByTestId("target").click({ button: 2 })
+
+    // `onClick` is the primary button only, like the DOM. A right click
+    // reaches `onMouseDown` and `onAuxClick`.
+    expect(seen).toEqual([
+      { button: 0 },
+      { click: false },
+      { button: 2 },
+      { aux: true },
+    ])
+    await app.close()
+  })
+
+  it("wheels over a locator and reports held modifiers", async () => {
+    const seen: Array<{ deltaY: number; cmd: boolean }> = []
+
+    function Surface() {
+      return (
+        <div
+          testId="surface"
+          style={{ width: 300, height: 200, backgroundColor: "#101010" }}
+          onScroll={(event) =>
+            seen.push({
+              deltaY: event.deltaY ?? 0,
+              cmd: event.modifiers?.cmd ?? false,
+            })
+          }
+        >
+          <text>surface</text>
+        </div>
+      )
+    }
+
+    const { render, renderer } = createTestRoot()
+    render(<Surface />)
+    const app = await connectTest(renderer)
+
+    await app.getByTestId("surface").wheel(0, -60)
+    await app.getByTestId("surface").wheel(0, -60, { modifiers: "cmd" })
+
+    expect(seen).toEqual([
+      { deltaY: -60, cmd: false },
+      { deltaY: -60, cmd: true },
+    ])
+    await app.close()
+  })
+
+  // Custom elements paint themselves, so they only appear in the bounds
+  // registry if their builder attaches `automation::bounds_tracker`. Without
+  // it, `click()` on an editor fails with "Element has no painted bounds" and
+  // the only workaround is a hard-coded pixel coordinate.
+  it("gives an input and a textarea painted bounds", async () => {
+    function Form() {
+      const [single, setSingle] = useState("one")
+      const [multi, setMulti] = useState("two")
+      return (
+        <div style={{ display: "flex", flexDirection: "column", width: 400, height: 200 }}>
+          <input
+            testId="single"
+            style={{ width: 300, height: 40 }}
+            value={single}
+            onChange={(event) => setSingle(event.value)}
+          />
+          <textarea
+            testId="multi"
+            style={{ width: 300, height: 60 }}
+            value={multi}
+            onChange={(event) => setMulti(event.value)}
+          />
+        </div>
+      )
+    }
+
+    const { render, renderer } = createTestRoot()
+    render(<Form />)
+    const app = await connectTest(renderer)
+
+    const single = await app.getByTestId("single").bounds()
+    const multi = await app.getByTestId("multi").bounds()
+    expect(single).not.toBeNull()
+    expect(multi).not.toBeNull()
+    expect(single!.width).toBeGreaterThan(0)
+    expect(single!.height).toBeGreaterThan(0)
+    // The textarea is laid out under the input, so its box must start lower.
+    expect(multi!.y).toBeGreaterThan(single!.y)
+
+    await app.close()
+  })
 })

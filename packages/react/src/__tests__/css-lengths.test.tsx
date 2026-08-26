@@ -1,9 +1,9 @@
 /// `lineHeight` the way CSS reads it, and `calc()` in a length.
 ///
-/// Both cases paint twice and compare. A bare `lineHeight` is a multiple of the
-/// font size, so `1.5` and `"150%"` and `24` pixels at a 16 px font all have to
-/// land on the same pixels. A `calc()` has to land on the same pixels as the
-/// number it folds to.
+/// Both cases paint twice and compare. A JS number is pixels, as in React
+/// Native, so `lineHeight: 40` and `"40px"` land on the same pixels. A string
+/// follows CSS, so `"2.5"` and `"250%"` at a 16 px font land on 40 pixels. A
+/// `calc()` has to land on the same pixels as the number it folds to.
 
 import fs from "fs"
 import path from "path"
@@ -50,9 +50,9 @@ const lines = (declaration: Record<string, unknown>) => (
 )
 
 describeNative("line height", () => {
-  it("reads a bare number as a multiple of the font size", () => {
-    // 2.5 used to mean 2.5 pixels. In CSS it means 40 pixels at a 16 px font.
-    paint("multiple", lines({ lineHeight: 2.5 }))
+  it("reads a bare number in a string as a multiple of the font size", () => {
+    // "2.5" used to mean 2.5 pixels. In CSS it means 40 pixels at a 16 px font.
+    paint("multiple", lines({ lineHeight: "2.5" }))
     paint("pixels", lines({ lineHeight: "40px" }))
     paint("unset", lines({}))
     // The declaration has to do something, or the comparison below is empty.
@@ -66,10 +66,11 @@ describeNative("line height", () => {
     expectScreenshotsEqual(shot("percent"), shot("percent-direct"))
   })
 
-  it("reads a multiple written as text the same as a number", () => {
-    paint("multiple-text", lines({ lineHeight: "2.5" }))
-    paint("multiple-number", lines({ lineHeight: 2.5 }))
-    expectScreenshotsEqual(shot("multiple-text"), shot("multiple-number"))
+  it("reads a JS number as pixels", () => {
+    // React Native reads `lineHeight: 40` as 40 pixels, and so does GPUIX.
+    paint("number-pixels", lines({ lineHeight: 40 }))
+    paint("number-pixels-direct", lines({ lineHeight: "40px" }))
+    expectScreenshotsEqual(shot("number-pixels"), shot("number-pixels-direct"))
   })
 
   it("reads rem against the root font size", () => {

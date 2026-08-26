@@ -4,28 +4,28 @@
 import fs from "fs"
 import { beforeEach, describe, expect, it } from "vitest"
 import React, { useState } from "react"
-import { createTestRoot, hasNativeTestRenderer } from "../testing"
-import { bufferSimilarity, isCI } from "./test-utils"
+import { createTestRoot, hasNativeTestRenderer, type TestRoot } from "../testing"
+import { bufferSimilarity, isCI, SHOTS_DIR } from "./test-utils"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
-const IMAGE_FIXTURE_PATH = "/tmp/gpuix-img-fixture.svg"
+const IMAGE_FIXTURE_PATH = `${SHOTS_DIR}/gpuix-img-fixture.svg`
+const SVG_FIXTURE = [
+  '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140" viewBox="0 0 240 140">',
+  '<rect x="0" y="0" width="240" height="140" fill="#1e2d59"/>',
+  '<rect x="16" y="16" width="208" height="108" rx="14" fill="#5ca9ff"/>',
+  '<circle cx="68" cy="70" r="24" fill="#ffd166"/>',
+  '<rect x="112" y="50" width="88" height="14" rx="7" fill="#20304f"/>',
+  '<rect x="112" y="74" width="70" height="12" rx="6" fill="#2a3c61"/>',
+  "</svg>",
+].join("")
 
 function writeSvgFixture(filePath: string): void {
-  const svg = [
-    '<svg xmlns="http://www.w3.org/2000/svg" width="240" height="140" viewBox="0 0 240 140">',
-    '<rect x="0" y="0" width="240" height="140" fill="#1e2d59"/>',
-    '<rect x="16" y="16" width="208" height="108" rx="14" fill="#5ca9ff"/>',
-    '<circle cx="68" cy="70" r="24" fill="#ffd166"/>',
-    '<rect x="112" y="50" width="88" height="14" rx="7" fill="#20304f"/>',
-    '<rect x="112" y="74" width="70" height="12" rx="6" fill="#2a3c61"/>',
-    "</svg>",
-  ].join("")
-  fs.writeFileSync(filePath, svg, "utf8")
+  fs.writeFileSync(filePath, SVG_FIXTURE, "utf8")
 }
 
 describeNative("custom element: img", () => {
-  let testRoot: ReturnType<typeof createTestRoot>
+  let testRoot: TestRoot
 
   beforeEach(() => {
     writeSvgFixture(IMAGE_FIXTURE_PATH)
@@ -101,8 +101,8 @@ describeNative("custom element: img", () => {
 
       testRoot.render(<ImageScreenshotProbe />)
 
-      const path0 = "/tmp/gpuix-img-0.png"
-      const path1 = "/tmp/gpuix-img-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-img-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-img-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -133,8 +133,7 @@ describeNative("custom element: img", () => {
 })
 
 describeNative("custom element: svg", () => {
-  it("renders a local SVG with the style color", () => {
-    writeSvgFixture(IMAGE_FIXTURE_PATH)
+  it("renders raw SVG source with the style color", () => {
     const testRoot = createTestRoot()
 
     function SvgScreenshotProbe() {
@@ -153,7 +152,7 @@ describeNative("custom element: svg", () => {
           onClick={() => setLoaded(true)}
         >
           <svg
-            src={loaded ? IMAGE_FIXTURE_PATH : ""}
+            source={loaded ? SVG_FIXTURE : ""}
             style={{ width: 240, height: 140, color: "#5ca9ff" }}
           />
         </div>
@@ -162,8 +161,8 @@ describeNative("custom element: svg", () => {
 
     testRoot.render(<SvgScreenshotProbe />)
 
-    const beforePath = "/tmp/gpuix-svg-0.png"
-    const afterPath = "/tmp/gpuix-svg-1.png"
+    const beforePath = `${SHOTS_DIR}/gpuix-svg-0.png`
+    const afterPath = `${SHOTS_DIR}/gpuix-svg-1.png`
     if (fs.existsSync(beforePath)) fs.unlinkSync(beforePath)
     if (fs.existsSync(afterPath)) fs.unlinkSync(afterPath)
 

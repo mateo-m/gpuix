@@ -5,12 +5,15 @@
   "scripts": {
     "counter": "bun --hot counter.tsx",
     "diff": "bun --hot diff.tsx",
-    "test": "vitest run",
+    "test": "vitest run --exclude '**/*.perf.test.tsx'",
+    "test:perf": "vitest run chat.perf.test.tsx timeline.perf.test.tsx",
     "native-text": "bun --hot native-text.tsx",
     "chat": "bun --hot chat.tsx",
+    "timeline": "bun --hot timeline.tsx",
     "compile": "bun compile.ts chat.tsx --name \"GPUIX Chat\" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint \"#10a37f\"",
     "demo": "bun --hot demo.tsx",
-    "compile:demo": "bun compile.ts demo.tsx --name \"GPUIX Demo\" --id dev.gpuix.demo"
+    "compile:demo": "bun compile.ts demo.tsx --name \"GPUIX Demo\" --id dev.gpuix.demo",
+    "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
     "@gpuix/react": "workspace:*",
@@ -23,6 +26,8 @@
   "devDependencies": {
     "@types/mdast": "^4.0.4",
     "@types/react": "^19.2.0",
+    "cbor-x": "^1.6.6",
+    "msgpackr": "^2.0.6",
     "tsx": "^4.19.0",
     "vitest": "^4.0.18"
   }
