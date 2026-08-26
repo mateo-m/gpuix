@@ -7,7 +7,11 @@
     "jsxImportSource": "@gpuix/react",
     "strict": true,
     "esModuleInterop": true,
-    "skipLibCheck": true
+    "skipLibCheck": true,
+    // Bun runs these files straight from source and `compile-chat.ts` bundles
+    // them. Nothing here is ever compiled by tsc, so an accidental `tsc -p .`
+    // must not litter the folder with .js next to every .tsx.
+    "noEmit": true
   },
   "include": [
     "./*.tsx",
