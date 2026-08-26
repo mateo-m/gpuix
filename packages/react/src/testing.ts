@@ -121,17 +121,22 @@ const NATIVE_ENV_OVERRIDES = ["GPUIX_SCROLLBARS"] as const
  * `process.env.GPUIX_SCROLLBARS = "classic"` from a test. This runs before
  * every frame flush to push the current values across.
  */
+// Resolved once. The module registry caches the require, but this also
+// skips the try/catch and the property read on every flush.
+let nativeSyncEnvVar: ((key: string, value?: string) => void) | undefined
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  nativeSyncEnvVar = (
+    require("@gpuix/native") as { syncEnvVar?: typeof nativeSyncEnvVar }
+  ).syncEnvVar
+} catch {
+  // Native module not available. Nothing to sync.
+}
+
 function syncEnvOverrides(): void {
-  let syncEnvVar: ((key: string, value?: string) => void) | undefined
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    syncEnvVar = (require("@gpuix/native") as { syncEnvVar?: typeof syncEnvVar }).syncEnvVar
-  } catch {
-    return
-  }
-  if (!syncEnvVar) return
+  if (!nativeSyncEnvVar) return
   for (const key of NATIVE_ENV_OVERRIDES) {
-    syncEnvVar(key, process.env[key])
+    nativeSyncEnvVar(key, process.env[key])
   }
 }
 

@@ -41,9 +41,9 @@ pub(crate) enum Mode {
 impl Mode {
     /// The mode for this window, with the environment override on top.
     pub(crate) fn current(cx: &App) -> Self {
-        match std::env::var("GPUIX_SCROLLBARS").as_deref() {
-            Ok("overlay") => Mode::Overlay,
-            Ok("classic") => Mode::Classic,
+        match crate::renderer::env_var("GPUIX_SCROLLBARS").as_deref() {
+            Some("overlay") => Mode::Overlay,
+            Some("classic") => Mode::Classic,
             _ if cx.should_auto_hide_scrollbars() => Mode::Overlay,
             _ => Mode::Classic,
         }

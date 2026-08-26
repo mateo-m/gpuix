@@ -520,12 +520,12 @@ export interface HighlightRect {
 }
 
 /**
- * Copies one `process.env` entry into the real process environment.
+ * Records one `process.env` entry for `env_var` readers.
  *
- * Rust reads overrides such as `GPUIX_SCROLLBARS` with `std::env::var`,
- * which reads the C environment. Node writes a `process.env` assignment
- * through to `setenv`, but Bun only updates its JS snapshot. A caller on
- * Bun must push the value across with this function.
+ * Rust reads overrides such as `GPUIX_SCROLLBARS` at paint. Node writes a
+ * `process.env` assignment through to `setenv`, but Bun only updates its
+ * JS snapshot. A caller on Bun must push the value across with this
+ * function.
  */
 export declare function syncEnvVar(key: string, value?: string | undefined | null): void
 

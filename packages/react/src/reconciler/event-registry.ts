@@ -9,11 +9,11 @@ import type { Container, EventHandlerMap, NativeRenderer } from "../types/host.j
 const CONTAINERS_KEY = "__gpuixEventContainers"
 
 function containersByRenderer(): WeakMap<NativeRenderer, Container> {
-  const existing = Reflect.get(globalThis, CONTAINERS_KEY) as
-    | WeakMap<NativeRenderer, Container>
-    | undefined
-  if (existing) {
-    return existing
+  const existing = Reflect.get(globalThis, CONTAINERS_KEY)
+  // Take the slot only when it really holds a WeakMap. Another value there
+  // (from user code or a second bundle copy) would throw on .get later.
+  if (existing instanceof WeakMap) {
+    return existing as WeakMap<NativeRenderer, Container>
   }
   const created = new WeakMap<NativeRenderer, Container>()
   Reflect.set(globalThis, CONTAINERS_KEY, created)
