@@ -14,7 +14,7 @@
     "forceConsistentCasingInFileNames": true,
     "jsx": "react-jsx",
     "jsxImportSource": "@gpuix/react",
-    "lib": ["ES2022"],
+    "lib": ["ES2022", "DOM"],
     "types": ["vitest/globals", "node"],
     "verbatimModuleSyntax": true
   },

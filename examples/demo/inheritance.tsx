@@ -19,7 +19,7 @@ const CASES: Array<[string, StyleDesc]> = [
   ["fontSize", { fontSize: 22 }],
   ["fontWeight", { fontWeight: "bold" }],
   ["fontFamily", { fontFamily: "Courier New" }],
-  ["lineHeight", { lineHeight: 2.2 }],
+  ["lineHeight", { lineHeight: "2.2" }],
   ["textAlign", { textAlign: "right" }],
 ]
 

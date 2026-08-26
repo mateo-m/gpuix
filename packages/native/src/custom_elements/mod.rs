@@ -49,6 +49,13 @@ pub struct CustomRenderContext<'a> {
     /// Everything this element inherits, so `var()` and `currentColor` in its
     /// style resolve the same way they do on a plain div.
     pub cascade: crate::inheritance::Inherited,
+    /// `highlight` declared by the nearest ancestor, unresolved.
+    ///
+    /// A native element generates its text during `render()`, so the retained
+    /// tree never sees it and the build-time resolver cannot produce ranges for
+    /// it. `ctx.text` matches the exact string it is about to paint instead,
+    /// which makes drift between the search pass and the paint pass impossible.
+    pub highlight_set: Option<std::sync::Arc<crate::text::HighlightContext>>,
 }
 
 impl CustomRenderContext<'_> {
@@ -73,16 +80,21 @@ impl CustomRenderContext<'_> {
         runs: Option<Vec<gpui::TextRun>>,
     ) -> gpui::AnyElement {
         let text = text.into();
-        if !self.selectable {
-            return crate::text::chrome_text(text, runs);
-        }
-        crate::text::selectable_text(crate::text::SelectableText::new(
-            text,
-            runs,
-            crate::text::selection_key(self.id, sub),
-            self.selection.clone(),
-            self.selection_wash,
-        ))
+        crate::text::selectable_text(crate::text::SelectableText {
+            selectable: self.selectable,
+            highlight: self
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
+            ..crate::text::SelectableText::new(
+                self.id,
+                sub,
+                text,
+                runs,
+                self.selection.clone(),
+                self.selection_wash,
+            )
+        })
     }
 
     /// Chrome text: line numbers, language tags, file headers. Painted and
@@ -289,6 +301,19 @@ impl CustomElementRegistry {
             .collect();
 
         for id in stale_ids {
+            self.destroy(id);
+        }
+    }
+
+    /// Destroy every live instance. Only for app teardown.
+    ///
+    /// An instance can hold a `gpui::Entity` handle: `<input>` keeps an
+    /// `Entity<TextEditorState>`. gpui's leak detector panics if any handle is
+    /// still alive when the `App` drops, so the registry has to be emptied
+    /// while the `App` is still there.
+    pub fn destroy_all(&mut self) {
+        let ids: Vec<u64> = self.instances.keys().copied().collect();
+        for id in ids {
             self.destroy(id);
         }
     }

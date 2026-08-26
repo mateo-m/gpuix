@@ -28,25 +28,32 @@ jobs:
           # default features include test-support (TestGpuixRenderer)
           - host: macos-latest
             target: aarch64-apple-darwin
+            bunTarget: bun-darwin-arm64
             build: bun run build --target aarch64-apple-darwin
           - host: macos-latest
             target: x86_64-apple-darwin
+            bunTarget: bun-darwin-x64
             build: bun run build --target x86_64-apple-darwin
           # ── Linux (Vulkan/wgpu) ────────────────────────────────────
-          # build:release skips test-support (pulls gpui_macos, macOS-only)
+          # build:release disables test-support until wgpu image readback lands.
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
+            bunTarget: bun-linux-x64
             build: bun run build:release --target x86_64-unknown-linux-gnu
           - host: ubuntu-24.04-arm
             target: aarch64-unknown-linux-gnu
+            bunTarget: bun-linux-arm64
             build: bun run build:release --target aarch64-unknown-linux-gnu
-          # ── Windows (Direct3D/wgpu) ────────────────────────────────
+          # ── Windows (Direct3D) ─────────────────────────────────────
+          # Test support includes TestGpuixRenderer and render_to_image.
           - host: windows-latest
             target: x86_64-pc-windows-msvc
-            build: bun run build:release --target x86_64-pc-windows-msvc
+            bunTarget: bun-windows-x64
+            build: bun run build --target x86_64-pc-windows-msvc
           - host: windows-latest
             target: aarch64-pc-windows-msvc
-            build: bun run build:release --target aarch64-pc-windows-msvc
+            bunTarget: bun-windows-arm64
+            build: bun run build --target aarch64-pc-windows-msvc
     name: build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     defaults:
@@ -122,6 +129,28 @@ jobs:
           path: packages/native/${{ env.APP_NAME }}.*.node
           if-no-files-found: error
 
+      - name: Build React package
+        working-directory: packages/react
+        shell: bash
+        run: bun run build
+
+      - name: Compile chat example
+        working-directory: examples
+        shell: bash
+        env:
+          COMPILE_OUT: example-chat-${{ matrix.settings.target }}
+          COMPILE_TARGET: ${{ matrix.settings.bunTarget }}
+          COMPILE_SKIP_ICONS: "1"
+          COMPILE_SKIP_APP: "1"
+        run: bun compile.ts chat.tsx --name "GPUIX Chat" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint "#10a37f"
+
+      - name: Upload example artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: example-chat-${{ matrix.settings.target }}
+          path: examples/dist/chat/example-chat-${{ matrix.settings.target }}*
+          if-no-files-found: error
+
   test:
     name: test
     needs: build
@@ -157,8 +186,14 @@ jobs:
         run: bun run test
         working-directory: examples
 
+      # Bun never typechecks. This step is what catches a broken public type,
+      # such as `key` disappearing from every element.
+      - name: Typecheck the example app
+        run: bun run typecheck
+        working-directory: example-app
+
   test-windows:
-    name: test-windows-load
+    name: test-windows
     needs: build
     runs-on: windows-latest
     steps:
@@ -172,6 +207,9 @@ jobs:
         with:
           node-version: 24
 
+      - name: Install dependencies
+        run: bun install
+
       - name: Download Windows x64 artifact
         uses: actions/download-artifact@v4
         with:
@@ -183,6 +221,22 @@ jobs:
 
       - name: Load native binding with Node
         run: node -e "require('./packages/native'); console.log('Windows native binding OK (node)')"
+
+      - name: Verify Windows test renderer
+        shell: bash
+        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.createElement(1, 'text'); renderer.setText(1, 'Windows test renderer'); renderer.setRoot(1); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
+
+      - name: Run React tests
+        run: bun run test
+        working-directory: packages/react
+
+      - name: Build React package
+        run: bun run build
+        working-directory: packages/react
+
+      - name: Run example tests
+        run: bun run test
+        working-directory: examples
 
   publish:
     name: publish
@@ -196,6 +250,8 @@ jobs:
       id-token: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
       - name: Setup node
         uses: actions/setup-node@v4
@@ -205,12 +261,25 @@ jobs:
       - name: Setup bun
         uses: oven-sh/setup-bun@v2
 
+      - name: Install browser Rust toolchain
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+        with:
+          toolchain: nightly
+          target: wasm32-unknown-unknown
+          components: rust-src
+          cache: false
+          rustflags: ""
+
+      - name: Install wasm-bindgen CLI
+        run: cargo install wasm-bindgen-cli --version 0.2.127 --locked
+
       - name: Install dependencies
         run: bun install
 
-      - name: Download all artifacts
+      - name: Download native artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: bindings-*
           path: packages/native/artifacts
 
       - name: Create npm dirs and move artifacts
@@ -265,3 +334,31 @@ jobs:
             "
             bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
           fi
+
+      - name: Download example artifacts
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: example-chat-*
+          path: example-artifacts
+          merge-multiple: true
+
+      - name: Upload example binaries to GitHub Release
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VERSION=$(node -p "require('./packages/react/package.json').version")
+          TAG="@gpuix/react@${VERSION}"
+          if ! gh release view "$TAG" >/dev/null 2>&1; then
+            echo "No GitHub release for ${TAG}, skipping example upload"
+            exit 0
+          fi
+          shopt -s nullglob
+          files=(example-artifacts/example-chat-*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "No example binaries to upload"
+            exit 0
+          fi
+          echo "Uploading example-chat binaries to ${TAG}"
+          gh release upload "$TAG" "${files[@]}" --clobber

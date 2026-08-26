@@ -4,7 +4,7 @@ React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates
 
 Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
 
-![A Waku-style app built with GPUIX](docs/images/chat-app.png)
+![A Waku-style app built with GPUIX](./docs/images/chat-app.png)
 
 Everything above is GPUIX: the sidebar, the scrolling list, the composer,
 and native `<markdown>`. Start it with **`bun --hot`** so a save remounts React
@@ -14,24 +14,197 @@ on the same window:
 cd examples && bun --hot chat.tsx
 ```
 
+## Quickstart
+
+Install two packages. `@gpuix/react` pulls the native renderer for your
+platform, so there is nothing to build and no Rust toolchain to install.
+
+```bash
+bun add @gpuix/react react
+bun add -d @types/react typescript
+```
+
+### 1. Point TypeScript at the GPUIX JSX types
+
+**`jsxImportSource` is required.** Without it TypeScript uses DOM types, so
+`<virtual-list>`, `<markdown>`, `<code>` and `style.hover` all fail to
+typecheck.
+
+```json
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "jsx": "react-jsx",
+    "jsxImportSource": "@gpuix/react",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true
+  }
+}
+```
+
+### 2. Write the entry file
+
+End the file with `render()`. That call creates the window, mounts React, and
+starts the frame loop.
+
+```tsx
+import { useState } from 'react'
+import { render } from '@gpuix/react'
+
+function App() {
+  const [count, setCount] = useState(0)
+  return (
+    <div style={{ padding: 24, backgroundColor: '#1a1a1a', height: '100%' }}>
+      <div
+        onClick={() => setCount((c) => c + 1)}
+        style={{
+          padding: 12,
+          borderRadius: 8,
+          cursor: 'pointer',
+          backgroundColor: '#232323',
+          hover: { backgroundColor: '#2c2c2c' },
+        }}
+      >
+        <text style={{ color: '#e2e2e2' }}>Count: {count}</text>
+      </div>
+    </div>
+  )
+}
+
+render(<App />, { title: 'My App', width: 800, height: 600 })
+```
+
+> [!IMPORTANT]
+> **Give every `<text>` a `color`.** GPUI does not inherit `color` from a
+> parent, so text with no color paints **black** and disappears on a dark
+> surface.
+
+### 3. Run it
+
+```bash
+bun --hot app.tsx
+```
+
+Use `bun --hot`, not plain `bun`. A save then remounts React on the same
+window instead of opening a second one.
+
+### 4. Ship a binary
+
+```bash
+bun build --compile app.tsx --outfile dist/app
+./dist/app
+```
+
+The binary carries the renderer, so it runs with no Bun and no Node install.
+
+### Start from the example app
+
+[`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
+`build`, `web:dev` and `typecheck` scripts already wired. Copy the folder,
+change `@gpuix/react` from `workspace:^` to a version range, and run
+`bun install`.
+
+![The GPUIX todo example app](./docs/images/todo-app.png)
+
 ## Examples
 
 | Example | Run | What it shows |
 |---|---|---|
+| **todo** | `bun run dev` in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
 | **chat** | `bun --hot chat.tsx` | A Waku-style app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
+| **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
 | **diff** | `bun --hot diff.tsx` | A diff viewer composed from `<div>` and `<text>` in JS, for comparison |
+| **web** | `bun run web` from the repository root | The ChatGPT example rendered in a browser canvas with WebGPU |
 
-All of them live in [`examples/`](./examples) and use hardcoded data.
+The todo app lives in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) and is meant to be copied.
+The rest live in [`examples/`](https://github.com/remorses/gpuix/tree/main/examples). All of them use hardcoded data.
+
+Or download a standalone **chat** build from the [GitHub release](https://github.com/remorses/gpuix/releases). Files are named `example-chat-<target>`. No Bun or Rust install is required.
+
+```bash
+chmod +x example-chat-aarch64-apple-darwin
+./example-chat-aarch64-apple-darwin
+```
+
+macOS may block the unsigned binary the first time. Right-click the file, choose **Open**, and confirm. Windows: download `example-chat-x86_64-pc-windows-msvc.exe` and double-click it.
+
+The web example bundles the same React app and reconciler as the desktop chat
+example. wasm-bindgen exposes the mutation interface to the existing retained
+tree and `GpuixView`, which run through GPUI's browser platform. Browser event
+callbacks are not supported yet.
+
+The web build needs nightly Rust and the matching wasm-bindgen CLI:
+
+```bash
+rustup toolchain install nightly --component rust-src --target wasm32-unknown-unknown
+cargo install wasm-bindgen-cli --version 0.2.127 --locked
+bun run web
+```
+
+The generated Wasm uses shared memory, so the page must be cross-origin
+isolated. Production servers must send these headers on the **top-level
+document**:
+
+```http
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+```
+
+`require-corp` then constrains **cross-origin** subresources, which must supply
+their own CORS or `Cross-Origin-Resource-Policy`. Serve the JavaScript and the
+Wasm from the same origin as the document and nothing else is needed.
+
+`bun run web` rebuilds the Wasm only when `packages/native/wasm` is missing.
+After a Rust change, force it:
+
+```bash
+bun scripts/web.ts --rebuild
+```
+
+#### Hot reload in the browser
+
+`bun run web` serves the example through Bun's frontend dev server, so an edit
+to `examples/chat.tsx` arrives as a **React Fast Refresh** update. Components
+swap in place and `useState` survives, which means the composer text, the
+sidebar selection, and the scroll position all stay where they were. The GPUI
+canvas is never re-created and the ~19 MB Wasm module is never re-fetched.
+
+Fast Refresh only applies to a module whose exports are all components. Edit
+anything else, such as the entry file, and Bun reloads the page instead. Both
+paths are correct; the reload is only slower.
+
+The Wasm half is a **singleton and must never re-evaluate**.
+`WebGpuixRenderer::init` fails with `GPUIX web is already running` once its
+thread-local app exists, and GPUI's browser platform appends its own canvas to
+`<body>`. What protects it is not that it lives in `node_modules`; Bun bundles
+it into the same client registry as your app. It is that Bun re-runs only the
+**changed** module and then walks upward through its importers, so an unchanged
+dependency stays evaluated and cached. Two rules follow:
+
+- do not call `import.meta.hot.accept("./your-app", ...)` in the entry file.
+  Bun runs an importer's dependency-accept callback **even when the imported
+  module already self-accepted**, so that callback would remount the tree on top
+  of a successful refresh and throw away every `useState`
+- keep the `@gpuix/native` import in a module that can never become a Refresh
+  boundary and is never explicitly accepted
+
+The chat example puts a virtualized `<diff>` and a GFM table inside an assistant
+turn, inside a scrolling transcript:
+
+![A diff and a markdown table inside a chat turn](./docs/images/chat-diff.png)
 
 Markdown, code and a virtualized diff in one frame:
 
-![Markdown, code and diff rendered together](docs/images/showcase.png)
+![Markdown, code and diff rendered together](./docs/images/showcase.png)
 
 ## Architecture
 
-GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI. React's reconciler sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust — no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
+GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps use napi-rs; browser apps load the same Rust renderer through wasm-bindgen. React's reconciler sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust, with no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -48,14 +221,14 @@ GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI
 │    )                                                            │
 │  }                                                              │
 └─────────────────────────────────────────────────────────────────┘
-                    │ napi FFI mutations
+                    │ napi desktop / wasm-bindgen browser
                     │ createElement(1, "div")
                     │ appendChild(0, 1)
                     │ setStyle(1, "{...}")
                     │ commitMutations()
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
-│  Rust (napi-rs)                                                 │
+│  Rust host bridge                                               │
 │                                                                 │
 │  RetainedTree ── stores elements, styles, event flags           │
 │       │                                                         │
@@ -67,7 +240,7 @@ GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI
 ┌─────────────────────────────────────────────────────────────────┐
 │  GPUI                                                           │
 │                                                                 │
-│  GPU rendering via Metal (macOS), DirectX (Windows), or Vulkan  │
+│  Metal, DirectX, Vulkan, or browser WebGPU / WebGL2              │
 │  Flexbox layout via Taffy                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -76,7 +249,7 @@ GPUIX bridges React to GPUI using a **mutation-based protocol** over napi-rs FFI
 
 GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIX embraces it:
 
-1. React reconciler detects a state change and calls napi mutations (`createElement`, `setStyle`, `appendChild`, etc.)
+1. React reconciler detects a state change and calls host mutations (`createElement`, `setStyle`, `appendChild`, etc.)
 2. Each mutation updates a **RetainedTree** on the Rust side — a HashMap of element nodes with styles, children, and event flags
 3. On each GPUI frame, `GpuixView::render()` walks the RetainedTree and calls `build_element()` to produce ephemeral GPUI elements
 4. GPUI lays them out (Taffy flexbox) and renders to the GPU
@@ -86,7 +259,7 @@ This is the same protocol React uses for the DOM (`createElement`, `appendChild`
 
 ## Mutation API
 
-The FFI surface between JS and Rust is a set of direct napi calls — the `NativeRenderer` interface:
+The host surface between JS and Rust is the `NativeRenderer` interface. Desktop uses napi calls and the browser uses wasm-bindgen methods:
 
 ```ts
 interface NativeRenderer {
@@ -107,7 +280,7 @@ Element IDs are plain numbers generated by an incrementing counter in JS. React 
 
 ## Event Flow
 
-Events travel from GPUI back to React through a `ThreadsafeFunction` callback:
+On desktop, events travel from GPUI back to React through a `ThreadsafeFunction` callback. Browser event callbacks are not connected yet.
 
 ```
 User clicks element id=3
@@ -135,10 +308,14 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 
 ## Packages
 
-- **`@gpuix/native`** — Rust/napi-rs bindings to GPUI. Contains `GpuixRenderer`, `RetainedTree`, `build_element()`, `apply_styles()`, and the event wiring.
+- **`@gpuix/native`** — Rust bindings to GPUI. It publishes napi-rs desktop binaries and a wasm-bindgen browser build, both backed by `GpuixRenderer`, `RetainedTree`, `build_element()`, and `apply_styles()`.
 - **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
 
 ## Building
+
+This section is for **working on GPUIX itself**. To build an app with it, see
+[Quickstart](#quickstart) instead. Installing the packages needs no Rust
+toolchain and no submodule.
 
 ### Prerequisites
 
@@ -210,7 +387,33 @@ terminal.
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
 | `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
+| `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
 Call it again after a save and it remounts the tree on the same window.
+
+### The macOS menu bar
+
+GPUIX installs the application menu bar for you, so a fresh app already answers
+`⌘Q`, `⌘H`, `⌥⌘H`, `⌘M`, and `⌘W`. Without it `NSApp.mainMenu` is nil, macOS
+paints an empty menu bar, and those shortcuts do not exist at all: AppKit only
+provides them through menu items.
+
+```
+Apple    <executable>             Window
+         ├ Services               ├ (AppKit window tiling)
+         ├ Hide <appName>   ⌘H    ├ Minimize          ⌘M
+         ├ Hide Others     ⌥⌘H    ├ Zoom
+         ├ Show All               ├ Close Window      ⌘W
+         └ Quit <appName>   ⌘Q    └ (open windows)
+```
+
+**`appName` does not set the title of the application menu.** macOS takes that
+from the executable, so `bun app.tsx` shows `bun` during development and a
+`bun build --compile` binary shows its own file name. Only a real `.app` bundle
+changes it. `appName` reaches the items inside the menu, and nothing else.
+
+There is **no Edit menu**, on purpose. A menu key equivalent is consumed by
+AppKit before the window sees the key event, so an Edit menu carrying `⌘C`
+would take the keystroke away from text selection and from `<input>`.
 
 Use **`render()`**, not `createRenderer()`, in the app entry. `bun --hot`
 re-runs the whole file on save. `createRenderer()` plus `init()` would then
@@ -220,6 +423,28 @@ later calls only remount React.
 `createRenderer()`, `createRoot()`, and `startFrameLoop()` stay public for
 tests and custom hosts. Pass `{ renderer }` into `render()` when you already
 have one.
+
+### flushSync
+
+The root is a **concurrent root**, so React commits in a later microtask.
+`flushSync` forces the render and the commit to finish before it returns, the
+same as in `react-dom`.
+
+```tsx
+import { flushSync } from '@gpuix/react'
+
+flushSync(() => setSidebarOpen(true))
+```
+
+It flushes **React only**, down to one `applyBatch` call. After it returns the
+native retained tree is up to date, including styles and text.
+
+It does **not** wait for GPUI. Layout and paint still happen on the next frame,
+exactly like the browser paints after a DOM mutation. To see pixels, wait a
+frame in the app, or call `renderer.flush()` in a test.
+
+Use it when an ordering bug depends on the commit landing first: an unmount
+before a remount, or a state change before you feed the next event.
 
 ## Debug frame overlay
 
@@ -253,11 +478,13 @@ The overlay shows **draw time**, not FPS. `8.3 MS` is about 120 Hz.
 
 The chat example has a regression test for this: `examples/chat.perf.test.tsx`. It times mount, wheel draw, and sidebar clicks. It asserts p95, not every frame.
 
+The default example suite excludes this hardware-timing test so shared CI runner variance does not fail functional checks. Run it explicitly on the target Mac:
+
 On macOS, `THROTTLE=utility` restarts the process under `taskpolicy -c utility`. That pins work to E-cores. It is an **M1/M2 Air CPU** proxy, not Chrome 6x. GPU and RAM stay fast. `THROTTLE=background` is slower.
 
 ```bash
 cd examples
-THROTTLE=utility bun run test chat.perf.test.tsx
+THROTTLE=utility bun run test:perf
 THROTTLE=utility bun --hot chat.tsx
 ```
 
@@ -508,6 +735,51 @@ function ScrollableList() {
 ```
 
 Per-axis scrolling: use `overflowX: "scroll"` or `overflowY: "scroll"`.
+`overflow: "scroll"` scrolls both axes at once from a single diagonal gesture,
+like a browser.
+
+A flex column stretches its children to the cross axis, so a two-axis container
+needs its rows to state a width. Without one there is nothing to pan on **X**:
+
+```tsx
+<div style={{ width: 260, height: 220, overflow: 'scroll', display: 'flex', flexDirection: 'column' }}>
+  {rows.map((row) => (
+    <div key={row.id} style={{ display: 'flex', width: 810, flexShrink: 0 }}>
+      {row.cells}
+    </div>
+  ))}
+</div>
+```
+
+### Panes that must move together
+
+A native scroll container cannot drive a **frozen header**. GPUI moves the
+container on the wheel frame, and the JavaScript callback that would move the
+header arrives a frame later, so the header tears away during a fast pan.
+
+When two panes must stay locked to the pixel, own the offset in React: put one
+`onScroll` listener on a non-scrolling parent, keep `scrollX` and `scrollY` in
+state, and translate each pane's content with an absolutely positioned wrapper.
+Zed does the same; the editor owns its scroll position and paints the gutter and
+the text from it.
+
+```tsx
+function Pane({ offsetX, children }: { offsetX: number; children: React.ReactNode }) {
+  return (
+    <div style={{ flexGrow: 1, minWidth: 0, overflow: 'hidden', position: 'relative' }}>
+      {/* An empty positioned box still takes hits, so opt it out. */}
+      <div style={{ position: 'absolute', left: -offsetX, top: 0, pointerEvents: 'none' }}>
+        {children}
+      </div>
+    </div>
+  )
+}
+```
+
+Keep the moving subtree in a `memo` component whose props do not change during a
+pan. The wheel then costs a handful of style mutations, not one per row. The
+[timeline example](./examples/timeline.tsx) does this for a ruler, a track
+column, and a clip grid.
 
 For programmatic scroll control, use a React ref to get the element's numeric ID, then call the renderer's scroll methods:
 
@@ -565,7 +837,7 @@ The list needs a **bounded height** or bounded flex space. Its direct children a
 | `alignment` | `"top"` | Use `"bottom"` for chat-style initial positioning |
 | `followTail` | `false` | Follow appended rows until the user scrolls away |
 | `overdraw` | `512` | Extra pixels built outside the viewport |
-| `estimatedItemHeight` | none | Gives unmeasured rows an initial height estimate |
+| `estimatedItemHeight` | none | Height hint for unmeasured rows. **Required** with `itemCount` |
 
 ### How virtualization works
 
@@ -587,9 +859,27 @@ React Fiber + Rust RetainedTree    all row IDs, props, text, and events
        GPUI layout and paint      visible rows only
 ```
 
-GPUI measures a row when it enters the viewport. `estimatedItemHeight` gives unseen rows an approximate height so the scrollbar is useful before every row has been visited. The measured height replaces the estimate automatically.
+### Row heights
 
-When a retained descendant changes, GPUIX marks its direct row for remeasurement. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+**Rows do not need equal heights, and you do not need to know them.** GPUI measures a row when it enters the viewport. `estimatedItemHeight` is a **hint for rows nothing has measured yet**, not a size contract.
+
+```text
+index:     0        1        2        3        4        5        6        7
+       ┌────────┬────────┬────────┬────────┬────────┬────────┬────────┬────────┐
+       │  hint  │  hint  │measured│measured│measured│  hint  │  hint  │  hint  │
+       │  220px │  220px │  184px │  512px │   96px │  220px │  220px │  220px │
+       └────────┴────────┴────────┴────────┴────────┴────────┴────────┴────────┘
+           ▲                          ▲                          ▲
+           │                          │                          │
+     estimate only         real, variable heights          estimate only
+                          (viewport plus overdraw)
+```
+
+The sum of that height cache is the scroll length, so a rough estimate only affects **scrollbar accuracy** before a row is visited. The measured height replaces the estimate automatically, and the scrollbar converges as you scroll.
+
+When a retained descendant changes, GPUIX marks its direct row for remeasurement, so a streaming row grows correctly. Appending, removing, or reordering keyed rows keeps measurements for rows whose IDs did not change.
+
+`estimatedItemHeight` is optional in children mode, where every row exists and can be measured. It is **required** with `itemCount`, because React never mounts the rows outside the window and native has no element to measure. Those indexes render as an empty box of the estimated height until React mounts the real row.
 
 ### Row boundaries
 
@@ -626,6 +916,37 @@ Combine `alignment="bottom"` and `followTail` for a chat thread:
 
 The list follows new rows while the user is at the bottom. Scrolling upward pauses tail following. Returning to the bottom enables it again. A streaming final row is remeasured as its content grows.
 
+### Scroll anchoring
+
+The list is anchored on a **row index**, not on a pixel offset. In children mode React reconciles by key, so that index still lands on the same row after a prepend: the rows already on screen stay exactly where they are. A browser does the same, and calls it scroll anchoring.
+
+One exception, also copied from the browser: a top-aligned list that is scrolled to the **very top** stays at the top, so a prepended row is visible.
+
+```text
+scrolled down                          pinned to the top
+┌──────────────────┐                   ┌──────────────────┐
+│ new row  (above) │  ◄── inserted     │ new row          │  ◄── inserted, visible
+├──────────────────┤                   ├──────────────────┤
+│ ░░ viewport ░░░░ │  stays put        │ ░░ viewport ░░░░ │  follows the insert
+│ ░░░░░░░░░░░░░░░░ │                   │ ░░░░░░░░░░░░░░░░ │
+└──────────────────┘                   └──────────────────┘
+```
+
+That is what a todo list or a feed wants: `setItems((current) => [fresh, ...current])` puts the new row on screen. A history pane that loads older pages while the user reads should use `alignment="bottom"` instead, so a page load never moves the text.
+
+**With `itemCount`, the app owns the correction.** There is no key to reconcile against, so the index is all there is. Prepending shifts every row down one slot, and the anchor keeps pointing at the old number, so the content slides by exactly the number of rows you inserted. Move `windowStart` by the same amount:
+
+```tsx
+const prepend = (fresh: Row) => {
+  setRows((current) => [fresh, ...current])
+  // The anchor is an index. One new row above the window means every existing
+  // row moved down one, so the window has to move with it.
+  setWindowStart((start) => (start === 0 ? 0 : start + 1))
+}
+```
+
+Leave `windowStart` at `0` alone; the list is pinned to the top there and the new row should be visible.
+
 ### Programmatic scrolling
 
 Use a ref to call the same renderer scroll methods as a plain scroll container:
@@ -658,7 +979,7 @@ function Results({ rows }: { rows: Result[] }) {
 
 ### Performance model
 
-| Work | Plain scroll container | `<virtual-list>` children | `VirtualList` + `itemCount` |
+| Work | Plain scroll container | `<virtual-list>` children | `<virtual-list>` + `itemCount` |
 |---|---|---|---|
 | React Fiber nodes | All rows | All rows | Visible window |
 | Rust retained nodes | All rows | All rows | Visible window |
@@ -666,7 +987,7 @@ function Results({ rows }: { rows: Result[] }) {
 | Layout and paint | All rows | Visible rows plus overdraw | Visible rows plus overdraw |
 | Height metadata | None | One lightweight entry per row | One lightweight entry per logical row |
 
-`VirtualList` with `itemCount` and `renderItem` mounts only the visible window. Use that for long transcripts. A 10,000-row `turns.map` still creates every React child. Collections with millions of rows still need application-level paging or a data-owning native element.
+The children form still creates every React child, so a 10,000-row `turns.map` is slow to mount. Pass `itemCount` and `windowStart` and render only that slice to mount a window too. Collections with millions of rows still need application-level paging or a data-owning native element.
 
 ### Keep scroll fast
 
@@ -678,20 +999,36 @@ Put a long list on `<virtual-list>`. Keep `overdraw` near one extra
 viewport. Put fat content in one native node (`<markdown>`, `<code>`, `<diff>`),
 not a tree of React spans.
 
-The host `<virtual-list>` still retains every React child. Pass `itemCount`
-and `renderItem` through `VirtualList` so mount only creates the window.
+The host `<virtual-list>` still retains every React child. Pass `itemCount`,
+`estimatedItemHeight` and `windowStart`, then render only that window, so mount
+does not create every row. Native ignores `itemCount` when the estimate is
+missing, so a jump cannot collapse unmounted rows to height 0.
+
+There is **no `VirtualList` wrapper component**. The window is app state:
+only the app knows when it must widen, for example when a filter grows
+`itemCount` without any scroll. Keep `start` in `useState`, move it from
+`onVisibleRange`, and slice around it.
 
 ```tsx
-import { VirtualList } from '@gpuix/react'
+const WINDOW = 40
 
 const Transcript = memo(function Transcript({ turns }: { turns: Turn[] }) {
+  const [start, setStart] = useState(0)
+  const end = Math.min(turns.length, start + WINDOW)
   return (
-    <VirtualList
+    <virtual-list
       itemCount={turns.length}
+      windowStart={start}
       estimatedItemHeight={220}
       style={{ flexGrow: 1, minHeight: 0 }}
-      renderItem={(index) => <ChatTurn key={turns[index].id} turn={turns[index]} />}
-    />
+      onVisibleRange={(event) =>
+        setStart(Math.max(0, Math.floor(event.startIndex ?? 0) - WINDOW / 4))
+      }
+    >
+      {turns.slice(start, end).map((turn) => (
+        <ChatTurn key={turn.id} turn={turn} />
+      ))}
+    </virtual-list>
   )
 })
 
@@ -718,6 +1055,42 @@ GPUIX sets `restrict_scroll_to_axis` on that path. Native
 
 Turn on `debugFrameOverlay: 'full'` while you scroll. The overlay is **draw
 time**. `8.3 MS` is about 120 Hz.
+
+### Pannable surfaces must cull
+
+`<virtual-list>` is the only thing that virtualizes. A surface where **you** own
+the offset — a timeline, a node graph, a map — places its children absolutely,
+so GPUI builds and lays out **every** retained child on every frame. Nothing
+skips them for you.
+
+`memo` and culling fix different halves, and only one of them is the draw:
+
+```
+memo(Layer)  ►  cuts React work and the applyBatch mutations
+cull in JS   ►  cuts GPUI build, Taffy layout, and paint
+```
+
+You already know the offset, so the visible window is a `useMemo` away:
+
+```tsx
+const visible = useMemo(() => {
+  const from = scrollX / pxPerSecond
+  const to = (scrollX + viewportWidth) / pxPerSecond
+  return clips.filter((clip) => clip.start <= to && clip.start + clip.duration >= from)
+}, [clips, scrollX, pxPerSecond, viewportWidth])
+```
+
+The timeline example measures both, on 3,259 clips across 26 tracks:
+
+| Wheel pan, one full frame | p50 |
+|---|---|
+| Culled | **7.7 ms** |
+| `memo` only, no culling | **92 ms** |
+
+> [!IMPORTANT]
+> A perf sample must include `renderer.flush()`. Without it you time the React
+> update and none of the GPUI build, layout, and paint that follows. The
+> `memo`-only number above looks like **0.6 ms** if you forget.
 
 ## Text input
 
@@ -1005,10 +1378,23 @@ Give every overlay an **opaque** fill (`#232323`, not `#23232399`).
 color, or a solid hover color. A `#00000000` child on a blurred window punches
 through Metal to the desktop.
 
-A filled in-flow `div` blocks clicks and hovers behind it. The parent
-scroller still gets the wheel. `position: "absolute"` / `"fixed"` or
-`pointerEvents: "auto"` also steals the wheel. Set `pointerEvents: "none"`
-to pass hits through.
+A `div` that paints a fill, or that is positioned, blocks clicks and hovers
+behind it. The **wheel still passes**, so a pannable canvas can place its items
+absolutely and keep panning.
+
+Set **`pointerEvents: "auto"`** on an element that must swallow the wheel too,
+like a modal backdrop. `<anchored>` occludes by default and has its own
+`occlude` prop, so menus and tooltips need neither.
+
+> [!IMPORTANT]
+> The wheel does not bubble the way DOM events do. GPUI hit-tests one flat list
+> of painted boxes, so the wheel reaches **any** scroller behind the element,
+> not only an ancestor. An absolute card floating over an unrelated scroll pane
+> will scroll that pane. Give a real overlay `pointerEvents: "auto"`.
+
+`pointerEvents: "none"` means the element inserts **no hitbox**, so it blocks
+nothing behind it. It does not disable the listeners on that same element, and
+it does not inherit, so children keep their own hitboxes.
 
 ## Text selection
 
@@ -1026,7 +1412,7 @@ gutters — set `userSelect: "none"`, which inherits like the CSS property:
 </div>
 ```
 
-![Text selected across markdown blocks](docs/images/selection.png)
+![Text selected across markdown blocks](./docs/images/selection.png)
 
 Read the selection from the renderer:
 
@@ -1049,9 +1435,164 @@ rebuilds that continuity at paint time instead. The mechanism is ported from
 [Comet](https://github.com/zeronsh/comet) (MIT), which faced the same problem.
 </details>
 
+## Text highlighting and search
+
+The **`highlight` prop** paints a background wash behind matched text. Put it on
+any element and it applies to that element's subtree, so the root searches the
+window and a container searches only that container.
+
+```tsx
+<div highlight={{ query: 'fox' }}>
+  <text>the quick brown fox</text>
+</div>
+```
+
+It reaches `<text>`, `<code>`, `<markdown>` and `<diff>` with no extra props,
+because every string GPUIX paints goes through the same funnel.
+
+### A find bar
+
+`useTextSearch` owns the cursor and the count. `next` and `previous` are plain
+event handlers, so nothing here needs an effect.
+
+```tsx
+import { useTextSearch } from '@gpuix/react'
+
+function Find() {
+  const [query, setQuery] = useState('')
+  const search = useTextSearch({ query })
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', flex: 1 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+        <input value={query} onChange={(e) => setQuery(e.value ?? '')} />
+        <text>{search.total === 0 ? 'No results' : `${search.active + 1}/${search.total}`}</text>
+        <div onClick={search.previous}><text>↑</text></div>
+        <div onClick={search.next}><text>↓</text></div>
+      </div>
+
+      <div {...search.props} style={{ flex: 1 }}>
+        <Transcript />
+      </div>
+    </div>
+  )
+}
+```
+
+### Explicit ranges
+
+When you already have offsets, from an LSP range or your own model, pass them
+instead of a query. They are `[start, end)` in **UTF-16 code units**, the units
+`indexOf` and `RegExp.exec` return.
+
+```tsx
+<div highlight={{ ranges: [[6, 11]], color: '#f43f5e55' }}>
+  <text>Hello {name}!</text>
+</div>
+```
+
+A pair that splits a surrogate pair is **rejected**, never snapped. Ranges index
+retained text only; native elements build their strings in Rust, so use `query`
+for those.
+
+### Options
+
+| field | meaning |
+|---|---|
+| `query` | substring to match, case-insensitive by default |
+| `caseSensitive` | exact case only |
+| `wholeWord` | neither neighbour may be alphanumeric or `_` |
+| `ranges` | explicit `[start, end)` UTF-16 pairs |
+| `color` / `activeColor` | any CSS colour; defaults come from the theme |
+| `activeIndex` | which match gets `activeColor`, for a find cursor |
+| `matchIndexOffset` | matches before this subtree; only for virtualized content |
+| `radius` | corner radius of the wash, default 2 |
+
+Pass an **array** to paint several at once, for example search matches plus a
+persistent mention tint. Later entries draw on top.
+
+### Matching rules
+
+Matches are **non-overlapping** and leftmost-first. Case-insensitive matching
+uses Unicode **lowercasing**, not full case folding, so `ﬀ` does not match `ff`.
+A word boundary is any code point that is not Unicode Alphabetic, a digit,
+or `_`.
+
+A match never crosses a line, exactly like browser find. It **does** cross the
+several host nodes React creates for one interpolated line, which matters more
+than it sounds:
+
+```tsx
+// React makes 3 host text nodes here. `Hello Tommy` still matches.
+<div highlight={{ query: 'Hello Tommy' }}>
+  <text>Hello {name}!</text>
+</div>
+```
+
+The nearest declaration wins, so a nested `highlight` replaces its ancestor's
+for that subtree.
+
+**`userSelect: "none"` does not opt out of search.** A browser still finds that
+text, so GPUIX still highlights it. Only element chrome, a code gutter or a diff
+file header, is excluded.
+
+<details>
+<summary>Searching a virtual list</summary>
+
+`<virtual-list>` never builds off-screen rows, so native can only see the
+mounted window. Two things follow, and both are the app's job because the app
+owns the row data.
+
+**Count the matches yourself** with `findRanges`, which runs the same algorithm
+as the native matcher on a string you give it.
+
+**Say where your window starts**, as a count of **matches** above it, not a row
+index. Without it native numbers the mounted rows from zero, `activeIndex` means
+"the nth visible match", and the find cursor lands on the wrong row.
+
+Both numbers travel together in `matches`, because supplying one without the
+other is always wrong.
+
+```tsx
+import { findRanges, useTextSearch } from '@gpuix/react'
+
+// One entry per row, so a prefix sum gives both numbers.
+const perRow = useMemo(
+  () => rows.map((row) => findRanges({ text: row.text, query }).length),
+  [rows, query],
+)
+
+const search = useTextSearch({
+  query,
+  matches: {
+    total: perRow.reduce((n, count) => n + count, 0),
+    indexOffset: perRow.slice(0, windowStart).reduce((n, count) => n + count, 0),
+  },
+})
+
+// search.next() moves the cursor; you do the scrolling
+listRef.current.scrollToItem(rowOfMatch(search.active))
+```
+
+`findRanges` matches the native algorithm for the **same** string. Call it on
+the same logical lines native paints: adjacent text nodes of one parent are one
+line, and `<markdown>` paints inline runs rather than its source.
+</details>
+
+<details>
+<summary>Why a wash and not gpui's HighlightStyle</summary>
+
+`HighlightStyle.background_color` is painted natively by gpui, but only with
+square corners, and it cannot report the boxes it drew. GPUIX paints quads from
+`range_rects`, the same helper selection and inline-code pills use, so a
+soft-wrapped match is one box per visual row and `getPaintedHighlights()` can
+assert the geometry without a screenshot. Zed's own editor paints search
+highlights manually for the same reason.
+</details>
+
 ## Native text components
 
-Three elements render text with Tree-sitter syntax highlighting computed in
+Three elements render text with Syntect syntax highlighting computed in
 Rust. Colours come from a theme prop, so a late-arriving highlight recolours runs
 without ever changing layout.
 
@@ -1060,16 +1601,47 @@ without ever changing layout.
 A syntax-highlighted code block. One row per line at an exact line height, so the
 block's height is known before highlighting runs.
 
+It paints **no surface of its own**: no fill, border, radius, padding or language
+header. `style` is the surface, so the card look is yours.
+
 ```tsx
 <code
   code={source}
   language="typescript"        // or path="src/app.ts" to detect from extension
   showLineNumbers
-  showHeader={false}
+  style={{
+    padding: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#ffffff1f',
+    backgroundColor: '#ffffff09',
+  }}
 />
 ```
 
-![A syntax-highlighted code block](docs/images/code.png)
+![A syntax-highlighted code block](./docs/images/code.png)
+
+`fontFamily`, `fontSize`, `fontWeight`, `lineHeight` and `color` in `style` beat
+the theme. Rows are a fixed height, so `fontSize` alone scales that height by the
+theme's ratio; pass `lineHeight` to set it exactly.
+
+Two things stay owned by the element: lines **never wrap**, and the block is its
+own horizontal scroller. A long line pans on a horizontal wheel inside it, so
+`whiteSpace` and `overflowX` in `style` do nothing.
+
+For a language header, or any other chrome, wrap it in a `<div>` you own:
+
+```tsx
+<div style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden' }}>
+  <div style={{ padding: 6, backgroundColor: '#ffffff09' }}>
+    <text style={{ fontSize: 12, color: '#a3a3a3' }}>{language}</text>
+  </div>
+  <code code={source} language={language} style={{ padding: 12, minWidth: 0 }} />
+</div>
+```
+
+`<markdown>` is different: it keeps its own fenced-block card, because a document
+renderer owns its layout. Tune that card with the `mdCode*` metrics.
 
 ### `<diff>`
 
@@ -1096,7 +1668,7 @@ scroller. See [Scrolling](#scrolling).
 />
 ```
 
-![A unified diff with word-level highlights](docs/images/diff.png)
+![A unified diff with word-level highlights](./docs/images/diff.png)
 
 ### `<markdown>`
 
@@ -1107,7 +1679,7 @@ strikethrough, task lists, and autolinked bare URLs.
 <markdown source={readme} onLinkClick={(e) => open(e.value)} />
 ```
 
-![Markdown with headings, lists, a table and a code fence](docs/images/markdown.png)
+![Markdown with headings, lists, a table and a code fence](./docs/images/markdown.png)
 
 ### Theming
 
@@ -1148,7 +1720,7 @@ so changing `diffLineHeight` also re-sizes the scroll model.
 
 The same three components, retuned entirely from `metrics` with no rebuild:
 
-![The components with enlarged metrics](docs/images/metrics.png)
+![The components with enlarged metrics](./docs/images/metrics.png)
 
 Languages bundled: Rust, TypeScript, TSX, JavaScript, JSX, Python, Go, JSON,
 Bash, TOML, YAML, Markdown, HTML, CSS, C.
@@ -1166,13 +1738,13 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `textarea`      | Native multiline, auto-growing text editor       |
 | `virtual-list`  | Long collections; only visible rows are built    |
 | `img`           | Local raster or SVG images                       |
-| `svg`           | Tintable monochrome SVG icons from local files   |
+| `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
 
 ## Images and icons
 
-Both elements take a **filesystem path**, not a URL. Resolve the file with
+`<img>` takes a **filesystem path**, not a URL. Resolve the file with
 `fileURLToPath` or `path.join` and pass that string as `src`.
 
 ### `<img>`
@@ -1194,9 +1766,13 @@ placeholder instead of crashing.
 
 ### `<svg>`
 
-`<svg>` uses GPUI's **monochrome icon renderer**. The file is drawn as a single
-shape and tinted with `style.color`. Use this for toolbar icons, not for
-full-colour artwork.
+`<svg>` uses GPUI's **monochrome icon renderer**. Raw `source` works on desktop
+and in the browser. Desktop apps can also use a local `src` path. The icon is
+drawn as one shape and tinted with `style.color`.
+
+For application icons, prefer **raw SVG source**. It works with both GPUIX
+targets and lets a bundler embed each icon in the JavaScript bundle. Use `src`
+only for a desktop app that intentionally ships loose asset files.
 
 `src` is a filesystem path **or** a `data:image/svg+xml,…` URL. Vitest and some
 Bun `import … with { type: 'file' }` bindings emit the data URL. GPUIX decodes
@@ -1206,20 +1782,54 @@ both.
 `fill="#000"` or `stroke="#000"` in the file. `currentColor` in the SVG is not
 the same as `style.color`.
 
+#### Bun
+
+Use Bun's [`text` loader](https://bun.sh/docs/bundler/loaders#text). The import
+is a string containing the complete SVG, and `bun build` embeds it in the
+bundle.
+
 ```tsx
+import searchSvg from './assets/icons/search.svg' with { type: 'text' }
+
 <svg
-  src={fileURLToPath(new URL('./assets/icons/search.svg', import.meta.url))}
+  source={searchSvg}
   style={{ width: 16, height: 16, color: '#b4b4b4' }}
 />
 ```
 
-The chat example builds every sidebar and composer icon this way.
+The chat example builds every sidebar and composer icon from raw SVG source this
+way.
+
+#### Node.js
+
+For supported Node.js releases, read the icon once relative to the module. A
+`URL` keeps the path correct across operating systems and avoids `__dirname`.
+
+```tsx
+import { readFileSync } from 'node:fs'
+
+const searchSvg = readFileSync(
+  new URL('./assets/icons/search.svg', import.meta.url),
+  'utf8',
+)
+
+<svg
+  source={searchSvg}
+  style={{ width: 16, height: 16, color: '#b4b4b4' }}
+/>
+```
+
+Node.js also has [text modules](https://nodejs.org/api/esm.html#text-modules),
+but they currently require `--experimental-import-text`. Prefer
+[`readFileSync`](https://nodejs.org/api/fs.html#fsreadfilesyncpath-options) until
+text imports no longer need a runtime flag.
 
 ## Supported Events
 
 | Event | Props | Payload fields |
 |-------|-------|----------------|
-| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` |
+| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |
@@ -1241,6 +1851,37 @@ The chat example builds every sidebar and composer icon this way.
 Keyboard and focus listeners create a persistent GPUI `FocusHandle`
 automatically. A listener alone does not put a `div` in the Tab order; add
 `tabIndex={0}` for that. Inputs and textareas already use tab index `0`.
+
+A node that listens for both `onMouseDown` and `onMouseMove` **captures the
+pointer**, like HTML [`setPointerCapture`](https://developer.mozilla.org/en-US/docs/Web/API/Element/setPointerCapture).
+`onMouseMove` and `onMouseUp` keep firing after the pointer leaves the hitbox,
+leaves the parent, and leaves the window. A node with only `onMouseDown` /
+`onMouseUp` does not capture, so a click still ends if you release outside.
+
+Capture is armed by the **press itself**, so put all three listeners on the
+element the user grabs:
+
+```tsx
+<div
+  style={{ cursor: 'grab', active: { cursor: 'grabbing' } }}
+  onMouseDown={(e) => beginDrag(e)}
+  onMouseMove={(e) => moveDrag(e)}
+  onMouseUp={endDrag}
+/>
+```
+
+A full-window overlay mounted on the press cannot replace this. The overlay does
+not exist yet when the press happens, so it never arms capture, and a release
+past the window edge is lost. Only the pressed element receives moves while the
+gesture runs, and only the hovered element receives them otherwise, so the cost
+is one event per pointer move.
+
+Capture arms on the **left** button only. A right-button drag is not captured,
+so it ends when the pointer leaves the element.
+
+`onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
+others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
+button through `event.button` (`0` left, `1` middle, `2` right).
 
 ## Supported Styles
 
@@ -1267,9 +1908,26 @@ CSS-like styling via the `style` prop:
 
 **Spacing:** `padding`, `paddingTop/Right/Bottom/Left`, `margin`, `marginTop/Right/Bottom/Left`
 
-**Position:** `position` (`"relative"` | `"absolute"`), `top`, `right`, `bottom`, `left`
+**Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 
 **Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+
+### Cursors
+
+`cursor` takes the CSS keyword. An unlisted keyword is ignored, like any other
+invalid style value.
+
+| Group | Keywords |
+|---|---|
+| Pointing | `default`, `auto`, `pointer`, `context-menu`, `not-allowed`, `no-drop` |
+| Text | `text`, `vertical-text`, `crosshair` |
+| Dragging | `grab`, `grabbing`, `move`, `all-scroll`, `alias`, `copy` |
+| Resizing | `col-resize`, `row-resize`, `ew-resize`, `ns-resize`, `nwse-resize`, `nesw-resize`, `n-resize`, `e-resize`, `s-resize`, `w-resize`, `ne-resize`, `nw-resize`, `se-resize`, `sw-resize` |
+
+```tsx
+<div style={{ cursor: 'grab', active: { cursor: 'grabbing' } }} />
+<div style={{ cursor: 'col-resize' }} />
+```
 
 ### Colors
 
@@ -1378,7 +2036,7 @@ Nesting is one level deep. A `hover` object cannot contain another `hover` or
 ## Automation
 
 Mark elements with **`testId`**, then drive them like Playwright. The same
-client works in vitest and against a child process.
+client works in vitest, inside browser pages, and against a child process.
 
 ```tsx
 <div testId="sidebar-collapse" onClick={onCollapse}>‹</div>
@@ -1408,17 +2066,73 @@ await app.screenshot({ path: 'sent.png' })
 ```
 
 That is the chat example. The real test lives in
-[`examples/chat.test.tsx`](./examples/chat.test.tsx).
+[`examples/chat.test.tsx`](https://github.com/remorses/gpuix/blob/main/examples/chat.test.tsx).
 
 ```
-createTestRoot()                 launch({ command, args })
-       │                                    │
-       ▼                                    ▼
- connectTest(renderer)              child stdin / stdout
-       │                                    │
-       └────────── App / Locator ───────────┘
-                    click, fill, screenshot
+createTestRoot()          browser render()          launch({ command, args })
+       │                         │                              │
+       ▼                         ▼                              ▼
+connectTest(renderer)      globalThis.gpuix                child stdin / stdout
+       │                         │                              │
+       └─────────────────────────┴──► App / Locator ◄───────────┘
+                                  click, fill, query, clock
 ```
+
+### Browser apps
+
+Every browser render installs the automation `App` as **`globalThis.gpuix`**.
+It is always available after `render()` returns. No setup flag or separate
+transport is required.
+
+```ts
+await page.evaluate(async () => {
+  await globalThis.gpuix
+    .getByTestId('sidebar-collapse')
+    .click()
+
+  await globalThis.gpuix
+    .getByTestId('composer')
+    .fill('hello from Playwriter')
+
+  await globalThis.gpuix.clock.pause()
+  await globalThis.gpuix.clock.fastForward(200)
+})
+```
+
+The browser global supports locators, input, tree and text queries, bounds,
+selection, scrolling, focus, and clock control. Browser pages cannot write an
+arbitrary local screenshot path. Use the controlling browser tool for that:
+
+```ts
+await page.screenshot({ path: 'review/chat.png', scale: 'css' })
+```
+
+Bounds come back in **canvas pixels**, not CSS pixels, because that is the
+coordinate space GPUI lays out in. On a 2x display a locator at `x: 44` sits at
+CSS `x: 22`. Convert before handing a rectangle to a browser tool:
+
+```ts
+const scale = await page.evaluate(() => {
+  const canvas = document.querySelector('canvas')!
+  return canvas.width / canvas.clientWidth
+})
+const { bounds } = await page.evaluate(() =>
+  globalThis.gpuix.getByText('New Task').waitFor(),
+)
+await page.screenshot({
+  scale: 'css',
+  clip: {
+    x: bounds.x / scale,
+    y: bounds.y / scale,
+    width: bounds.width / scale,
+    height: bounds.height / scale,
+  },
+})
+```
+
+Do not read `window.devicePixelRatio` for this. An automation tool can override
+the viewport scale factor after GPUI has already sized its canvas, and then the
+two disagree.
 
 ### Locators
 
@@ -1431,7 +2145,45 @@ createTestRoot()                 launch({ command, args })
 
 `click()` hits the center of the last painted bounds. `fill(text)` replaces the
 focused editor contents. `press('enter')` sends one key. `waitFor()` polls until
-exactly one match exists.
+exactly one match exists. `textContent()` returns the node's own text plus every
+descendant's, like DOM `textContent`.
+
+### Mouse, wheel, and drag
+
+| Call | What it does |
+|---|---|
+| `locator.hover()` | Moves the pointer to the center, so hover styles and tooltips fire |
+| `locator.wheel(dx, dy)` | One wheel event over the center |
+| `locator.dragBy(dx, dy)` | Presses on the center, travels, releases |
+| `locator.dragTo(target)` | Same, ending on another locator or a `{ x, y }` point |
+| `app.mouse.move / down / up / click` | Raw pointer input in window coordinates |
+| `app.mouse.wheel(target, dx, dy)` | A wheel over a point or a locator |
+| `app.mouse.drag(from, to)` | A drag between two points, two locators, or a mix |
+
+A drag sends **interpolated moves**, not one jump, because snapping, live
+previews, and per-move commits only appear when the pointer travels. Pass
+`steps` to control how many, and `offset` to press away from the center.
+
+```ts
+await app.getByTestId('clip-7').dragBy(120, 0, { steps: 6 })
+await app.getByTestId('clip-7-trim-end').dragTo(app.getByTestId('clip-8'))
+await app.mouse.drag({ x: 240, y: 500 }, { x: 700, y: 620 })
+```
+
+Every mouse call takes **`modifiers`** in the same syntax as `press('cmd-a')`,
+so cmd-wheel zoom, shift-click range selection, and alt-drag duplication are all
+testable:
+
+```ts
+await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
+await app.getByTestId('clip-8').click({ modifiers: 'shift' })
+```
+
+`click()` needs painted bounds, and a custom element only has them if its
+builder records them. `<div>`, `<text>`, `<input>`, `<textarea>` and `<code>`
+do. **`<img>`, `<svg>`, `<anchored>`, `<diff>` and `<markdown>` do not**, so
+`click()` on those throws `Element has no painted bounds`. `getByText` still
+finds text painted inside them, because text registers separately.
 
 ### Screenshots and clock
 
@@ -1470,8 +2222,15 @@ await app.close()
 
 The locators above sit on a **GPU-backed test renderer** (`TestGpuixRenderer`).
 It runs the same `GpuixView`, `build_element()`, `apply_styles()`, and event
-handlers as production. Windows are positioned offscreen but fully rendered by
-Metal. The methods below are the lower-level API when a locator is not enough.
+handlers as production. Test windows are positioned offscreen and rendered by
+Metal on macOS or DirectX on Windows. The methods below are the lower-level API
+when a locator is not enough.
+
+| Platform | Test renderer | PNG capture |
+|---|---|---|
+| macOS | Metal | Yes |
+| Windows | DirectX | Yes |
+| Linux | Not yet | Waiting for GPUI's wgpu headless renderer |
 
 ```ts
 import { createTestRoot } from '@gpuix/react/testing'
@@ -1479,7 +2238,7 @@ import { createTestRoot } from '@gpuix/react/testing'
 const { root, renderer } = createTestRoot()
 
 root.render(<MyComponent />)
-renderer.flush()  // triggers GpuixView::render() via Metal
+renderer.flush()  // triggers GpuixView::render() on the native GPU
 
 // Simulate events through GPUI's native input pipeline
 renderer.nativeSimulateClick(50, 50)
@@ -1487,7 +2246,7 @@ renderer.nativeSimulateKeystrokes('enter')
 
 // Inspect results
 const events = renderer.drainNativeEvents()
-const screenshot = renderer.captureScreenshot('/tmp/test.png')
+renderer.captureScreenshot('/tmp/test.png')
 const text = renderer.getAllText()
 ```
 
@@ -1498,7 +2257,7 @@ and `<markdown>` paint their text inside GPUI, so use `getPaintedText()`, which
 returns every string painted in the last frame in paint order:
 
 ```ts
-root.render(<code code={'a\nb'} language="ts" showHeader={false} />)
+root.render(<code code={'a\nb'} language="ts" />)
 expect(renderer.getPaintedText()).toEqual(['a', 'b'])
 ```
 
@@ -1509,6 +2268,40 @@ Selection has its own helper. Listeners are registered during **paint**, so
 ```ts
 expect(renderer.dragSelect(20, 30, 900, 300)).toBe('first line\nsecond line')
 ```
+
+A highlight is a **quad**, so no amount of `getPaintedText()` will show it. Use
+`getPaintedHighlights()`, which reports the matched range in UTF-16 units plus
+the boxes it actually drew, one per visual row:
+
+```ts
+root.render(
+  <div highlight={{ query: 'quick' }}>
+    <text>the quick brown fox</text>
+  </div>,
+)
+const [hit] = renderer.getPaintedHighlights()
+expect(hit.text.slice(hit.start, hit.end)).toBe('quick')
+expect(hit.rects).toHaveLength(1)
+```
+
+### Assert numbers, not pixels
+
+For a stateful surface, paint the state you want to assert into a **readout**
+element and read it with `textContent()`. A screenshot tells you that something
+changed; a readout tells you what, and the failure message names the number.
+
+```tsx
+<text testId="readout">{`x=${scrollX} y=${scrollY} zoom=${zoom} sel=${selected}`}</text>
+```
+
+```ts
+const readout = await app.getByTestId('readout').textContent()
+expect(readout).toBe('x=140 y=60 zoom=24 sel=clip-7')
+```
+
+Every test in [`examples/timeline.test.tsx`](./examples/timeline.test.tsx) works
+this way, including the drag, trim, snap, and zoom gestures. Keep the screenshot
+as well, for a human to look at after the run.
 
 Screenshots land in `packages/react/screenshots/` and `examples/screenshots/`,
 both gitignored, so they can be inspected after a run without adding a binary
@@ -1581,10 +2374,13 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Virtual lists (`<virtual-list>`)
 - [x] Native text components (`<code>`, `<diff>`, `<markdown>`)
 - [x] Cross-element text selection
+- [x] Text highlighting and search (`highlight`, `useTextSearch`)
 - [x] Headless Select, Combobox, and Tooltip
 - [x] Native `hover` and `active` styles
 - [x] Window title (`setWindowTitle`)
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
+- [x] macOS menu bar with the standard shortcuts (`appName`)
+- [ ] App-declared menus and menu callbacks
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
@@ -1596,8 +2392,8 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 
 ## Documentation
 
-See [AGENTS.md](./AGENTS.md) for detailed architecture, communication flow, and contributing guide.
+See [AGENTS.md](https://github.com/remorses/gpuix/blob/main/AGENTS.md) for detailed architecture, communication flow, and contributing guide.
 
 ## License
 
-Apache-2.0
+[Apache-2.0](https://github.com/remorses/gpuix/blob/main/LICENSE)

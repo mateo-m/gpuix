@@ -68,10 +68,12 @@ const EVENT_PROPS = [
   ["onLineClick", "lineClick"],
   ["onLinkClick", "linkClick"],
   ["onVisibleRange", "visibleRange"],
+  ["onHighlight", "highlight"],
   ["onChange", "change"],
   ["onSubmit", "submit"],
   // Mouse events
   ["onClick", "click"],
+  ["onAuxClick", "auxClick"],
   ["onMouseDown", "mouseDown"],
   ["onMouseUp", "mouseUp"],
   ["onMouseEnter", "mouseEnter"],
@@ -167,7 +169,16 @@ const BUILT_IN_TYPES = new Set(["div", "text"])
 
 // Props that reach Rust on EVERY element type, including div and text.
 // Custom props are otherwise skipped for built-ins.
-const UNIVERSAL_PROPS = new Set(["autoFocus", "tabIndex", "motion", "testId"])
+const UNIVERSAL_PROPS = new Set([
+  "autoFocus",
+  "tabIndex",
+  "motion",
+  "testId",
+  // `highlight` is scoped by where it sits in the tree, so it has to reach a
+  // plain `div`. Without it here, custom props are dropped for built-ins and
+  // the prop silently never arrives in Rust.
+  "highlight",
+])
 
 function isReservedProp(name: string): boolean {
   return RESERVED_PROPS.has(name) || EVENT_PROP_NAMES.has(name)
