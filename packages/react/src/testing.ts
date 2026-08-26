@@ -45,6 +45,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number): void
+  scrollIntoView(elementId: number, block?: string, inline?: string): void
   getScrollOffset(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
@@ -83,6 +84,31 @@ try {
 
 /** Whether the native TestGpuixRenderer is available (for conditional test registration). */
 export const hasNativeTestRenderer = NativeTestRenderer != null
+
+/// The env overrides the Rust side reads with `std::env::var`.
+const NATIVE_ENV_OVERRIDES = ["GPUIX_SCROLLBARS"] as const
+
+/**
+ * Copies the env overrides from `process.env` into the real environment.
+ *
+ * Node writes a `process.env` assignment through to `setenv`, but Bun only
+ * updates its JS snapshot, so under `bun test` the Rust side cannot see a
+ * `process.env.GPUIX_SCROLLBARS = "classic"` from a test. This runs before
+ * every frame flush to push the current values across.
+ */
+function syncEnvOverrides(): void {
+  let syncEnvVar: ((key: string, value?: string) => void) | undefined
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    syncEnvVar = (require("@gpuix/native") as { syncEnvVar?: typeof syncEnvVar }).syncEnvVar
+  } catch {
+    return
+  }
+  if (!syncEnvVar) return
+  for (const key of NATIVE_ENV_OVERRIDES) {
+    syncEnvVar(key, process.env[key])
+  }
+}
 
 export const MAC_CPU_THROTTLES = ["utility", "background", "maintenance"] as const
 
@@ -213,6 +239,7 @@ export class TestRenderer implements NativeRenderer {
   /** Trigger the real GPUI rendering pipeline (GpuixView::render() →
    *  build_element() → apply_styles() → layout). */
   flush(): void {
+    syncEnvOverrides()
     this.native.flush()
   }
 
@@ -465,6 +492,17 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
     this.native.scrollToItem(elementId, index)
     this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** Scroll every ancestor scroll box so the element shows, like the web
+   *  scrollIntoView. block places it on the y axis and inline on the x
+   *  axis: "start", "center", "end" or "nearest". The defaults match the
+   *  web: "start" and "nearest". scrollMargin on the element and
+   *  scrollPadding on a box apply. */
+  scrollIntoView(elementId: number, block?: string, inline?: string): void {
+    this.native.flush()
+    this.native.scrollIntoView(elementId, block, inline)
     this.native.flush()
   }
 

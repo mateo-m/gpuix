@@ -578,3 +578,4 @@ if (!nativeBinding) {
 module.exports = nativeBinding
 module.exports.GpuixRenderer = nativeBinding.GpuixRenderer
 module.exports.TestGpuixRenderer = nativeBinding.TestGpuixRenderer
+module.exports.syncEnvVar = nativeBinding.syncEnvVar

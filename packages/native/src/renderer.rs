@@ -491,6 +491,20 @@ fn panic_message(payload: Box<dyn std::any::Any + Send>) -> String {
         .unwrap_or_else(|| "unknown panic".to_string())
 }
 
+/// Copies one `process.env` entry into the real process environment.
+///
+/// Rust reads overrides such as `GPUIX_SCROLLBARS` with `std::env::var`,
+/// which reads the C environment. Node writes a `process.env` assignment
+/// through to `setenv`, but Bun only updates its JS snapshot. A caller on
+/// Bun must push the value across with this function.
+#[napi]
+pub fn sync_env_var(key: String, value: Option<String>) {
+    match value {
+        Some(value) => std::env::set_var(key, value),
+        None => std::env::remove_var(key),
+    }
+}
+
 /// The main GPUI renderer exposed to Node.js.
 #[napi]
 pub struct GpuixRenderer {
