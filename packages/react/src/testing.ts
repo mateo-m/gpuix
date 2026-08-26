@@ -55,10 +55,12 @@ interface NativeTestRendererApi extends NativeRenderer {
   resetStyleResolutions(): void
   dragSelect(x1: number, y1: number, x2: number, y2: number): void
   getSelectedText(): string | null
+  readClipboardText(): string | null
   getPaintedText(): string[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
+  pixelAt(x: number, y: number): number[]
 }
 
 interface NativeTestRendererConstructor {
@@ -491,6 +493,11 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getSelectedText()
   }
 
+  /// The text on the clipboard after a copy, or null when nothing text is there.
+  readClipboardText(): string | null {
+    return this.native.readClipboardText()
+  }
+
   /** Every string painted in the last frame, in paint order.
    *
    *  `getAllText()` only sees `<text>` nodes in the retained tree. Native
@@ -546,6 +553,13 @@ export class TestRenderer implements NativeRenderer {
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
+  }
+
+  /** The painted colour at a logical pixel, as `[r, g, b, a]` from 0 to 255. */
+  pixelAt(x: number, y: number): [number, number, number, number] {
+    this.native.flush()
+    const [r, g, b, a] = this.native.pixelAt(x, y)
+    return [r, g, b, a]
   }
 
   /** Whether the native GPUI test renderer is available. Always true. */

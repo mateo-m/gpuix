@@ -9,6 +9,7 @@ license = "Apache-2.0"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
+image = { version = "0.25", default-features = false }
 # CSS value reading, including `calc()`. Kept in its own crate so its tests run
 # without a GPU. See `css/`.
 gpuix-css = { path = "css" }

@@ -2670,6 +2670,7 @@ dependencies = [
  "gpui_macos",
  "gpui_platform",
  "gpuix-css",
+ "image",
  "log",
  "napi",
  "napi-build",
