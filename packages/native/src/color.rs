@@ -9,12 +9,7 @@ use gpuix_css::color::{ColorContext, Rgba};
 
 /// Turn engine channels into GPUI's sRGB paint type.
 pub(crate) fn to_gpui(color: Rgba) -> gpui::Rgba {
-    gpui::Rgba {
-        r: color.r,
-        g: color.g,
-        b: color.b,
-        a: color.a,
-    }
+    gpui::Rgba { r: color.r, g: color.g, b: color.b, a: color.a }
 }
 
 /// Turn a GPUI colour into engine channels.
@@ -23,12 +18,7 @@ pub(crate) fn to_gpui(color: Rgba) -> gpui::Rgba {
 /// this way to reach the cascade.
 pub(crate) fn from_gpui(color: impl Into<gpui::Rgba>) -> Rgba {
     let color = color.into();
-    Rgba {
-        r: color.r,
-        g: color.g,
-        b: color.b,
-        a: color.a,
-    }
+    Rgba { r: color.r, g: color.g, b: color.b, a: color.a }
 }
 
 /// Turn engine channels into GPUI's HSL paint type.
@@ -62,6 +52,8 @@ pub(crate) fn to_background(fill: &gpuix_css::background::Fill) -> gpui::Backgro
                     color: to_hsla(stop.color),
                     percentage: stop.position,
                     hint: stop.hint,
+                    // The GPUI shader now solves the easing per fragment, so
+                    // the half-point hint approximation is gone.
                     easing: stop.easing,
                 })
                 .collect();
@@ -227,12 +219,7 @@ mod tests {
     #[test]
     fn reads_current_color_from_the_context() {
         let context = ColorContext {
-            current_color: Rgba {
-                r: 1.0,
-                g: 0.0,
-                b: 0.0,
-                a: 1.0,
-            },
+            current_color: Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 },
             dark: false,
         };
         assert_eq!(
@@ -252,5 +239,19 @@ mod tests {
             parse_color_hex("oklch(0.62796 0.25768 29.23388 / 50%)"),
             Some(u32::from(rgba))
         );
+    }
+
+    #[test]
+    fn an_easing_reaches_the_gpui_stop() {
+        let reading = gpuix_css::background::read(
+            "linear-gradient(to right, #ff0000, ease-in, #0000ff)",
+            &ColorContext::default(),
+        )
+        .expect("the gradient parses")
+        .expect("the value is not none");
+        let background = to_background(&reading.fill);
+        // GPUI keeps its stops private, so the check reads the Debug form.
+        let painted = format!("{background:?}");
+        assert!(painted.contains("easing: [0.42, 0.0, 1.0, 1.0]"), "{painted}");
     }
 }

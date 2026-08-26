@@ -18,6 +18,7 @@ const OUT = path.join(ROOT, 'docs', 'images')
 
 /** `[source screenshot, committed name]`, relative to the repo root. */
 const CURATED: [string, string][] = [
+  ['example-app/screenshots/todo.png', 'todo-app.png'],
   ['examples/screenshots/chat-top.png', 'chat-app.png'],
   ['packages/react/screenshots/showcase.png', 'showcase.png'],
   ['packages/react/screenshots/markdown-document.png', 'markdown.png'],
@@ -42,6 +43,9 @@ run('bun', ['run', 'test', 'markdown'], path.join(ROOT, 'packages', 'react'))
 run('bun', ['run', 'test', 'code'], path.join(ROOT, 'packages', 'react'))
 run('bun', ['run', 'test', 'diff-native'], path.join(ROOT, 'packages', 'react'))
 run('bun', ['run', 'test', 'chat'], path.join(ROOT, 'examples'))
+// The todo example has no test suite. It captures itself through the
+// automation client, with the motion clock paused.
+run('bun', ['run', 'screenshot'], path.join(ROOT, 'example-app'))
 
 fs.mkdirSync(OUT, { recursive: true })
 for (const [from, name] of CURATED) {
