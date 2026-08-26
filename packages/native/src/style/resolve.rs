@@ -295,11 +295,20 @@ fn overscroll(
     let word = match longhand {
         Some(word) => word.trim(),
         None => {
-            let words: Vec<&str> = shorthand?.split_whitespace().collect();
-            match words.len() {
-                1 => words[0],
-                2 => words[axis],
-                _ => return None,
+            // The shorthand has one or two words. Walk it without a Vec,
+            // because this runs for every element on every render.
+            let mut words = shorthand?.split_whitespace();
+            let first = words.next()?;
+            match (words.next(), words.next()) {
+                (None, _) => first,
+                (Some(second), None) => {
+                    if axis == 0 {
+                        first
+                    } else {
+                        second
+                    }
+                }
+                (Some(_), Some(_)) => return None,
             }
         }
     };
@@ -697,6 +706,30 @@ pub(crate) fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn an_overscroll_shorthand_splits_by_axis() {
+        // One word covers both axes. Two words are x then y, as in CSS.
+        // Three words declare nothing.
+        assert_eq!(
+            overscroll(None, Some("contain"), 1),
+            Some(gpui::Overscroll::Contain)
+        );
+        assert_eq!(
+            overscroll(None, Some("contain none"), 0),
+            Some(gpui::Overscroll::Contain)
+        );
+        assert_eq!(
+            overscroll(None, Some("contain none"), 1),
+            Some(gpui::Overscroll::None)
+        );
+        assert_eq!(overscroll(None, Some("contain none auto"), 0), None);
+        // The longhand wins over the shorthand.
+        assert_eq!(
+            overscroll(Some("auto"), Some("contain"), 0),
+            Some(gpui::Overscroll::Auto)
+        );
+    }
 
     fn styled(color: &str) -> Box<StyleDesc> {
         Box::new(StyleDesc {
