@@ -14,7 +14,8 @@ use std::time::{Duration, Instant};
 
 use gpui::{
     canvas, point, px, App, Bounds, InputEvent, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window,
+    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, ScrollDelta, ScrollWheelEvent, Styled,
+    TouchPhase, Window,
 };
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +80,8 @@ pub fn bounds_tracker(id: u64, selection_start: Option<bool>) -> impl IntoElemen
         },
     )
     .absolute()
+    .top_0()
+    .left_0()
     .size_full()
 }
 
@@ -244,6 +247,26 @@ pub fn dispatch_mouse_move(
             position: point(px(x as f32), px(y as f32)),
             pressed_button: pressed_button.map(mouse_button),
             modifiers: Modifiers::default(),
+        }
+        .to_platform_input(),
+        cx,
+    );
+}
+
+pub fn dispatch_scroll_wheel(
+    window: &mut Window,
+    cx: &mut App,
+    x: f64,
+    y: f64,
+    delta_x: f64,
+    delta_y: f64,
+) {
+    window.dispatch_event(
+        ScrollWheelEvent {
+            position: point(px(x as f32), px(y as f32)),
+            delta: ScrollDelta::Pixels(point(px(delta_x as f32), px(delta_y as f32))),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
         }
         .to_platform_input(),
         cx,

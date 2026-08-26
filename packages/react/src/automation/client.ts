@@ -505,6 +505,7 @@ export interface LiveAutomationRenderer {
   simulateMouseDown(x: number, y: number, button?: number): void
   simulateMouseUp(x: number, y: number, button?: number): void
   simulateMouseMove(x: number, y: number, pressedButton?: number): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
   tick?(): void
   focusElement(elementId: number): void
   blur(): void
@@ -546,8 +547,9 @@ export function liveRendererAsTest(
       renderer.simulateMouseMove(x, y, pressedButton)
       afterInput()
     },
-    nativeSimulateScrollWheel() {
-      throw new AutomationError("Unsupported", "scrollWheel is not live yet")
+    nativeSimulateScrollWheel(x, y, deltaX, deltaY) {
+      renderer.simulateScrollWheel(x, y, deltaX, deltaY)
+      afterInput()
     },
     simulateKeystrokes() {
       throw new AutomationError("Unsupported", "keystrokes are not live yet")

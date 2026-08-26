@@ -102,6 +102,7 @@ export declare class GpuixRenderer {
   simulateMouseDown(x: number, y: number, button?: number | undefined | null): void
   simulateMouseUp(x: number, y: number, button?: number | undefined | null): void
   simulateMouseMove(x: number, y: number, pressedButton?: number | undefined | null): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
   clockPause(): number
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
