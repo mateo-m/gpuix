@@ -11,11 +11,13 @@ import { describe, it, expect, beforeEach } from "vitest"
 import React from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { motion } from "../index"
-import { bufferSimilarity, isCI } from "./test-utils"
+import { bufferSimilarity, isCI, MONO_FAMILY, SHOTS_DIR } from "./test-utils"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
-const SCREENSHOT_DIR = "/tmp"
+// Not `/tmp`: that path does not exist on Windows, so every capture failed
+// there with `The system cannot find the path specified`.
+const SCREENSHOT_DIR = SHOTS_DIR
 
 /** Centering wrapper — fills the test window and centers content. */
 function Center({ children }: { children: React.ReactNode }) {
@@ -338,7 +340,7 @@ describeNative("style properties", () => {
                 borderRadius: 8,
               }}
             >
-              <text style={{ color: "#cdd6f4", fontSize: 16, fontFamily: "Menlo" }}>
+              <text style={{ color: "#cdd6f4", fontSize: 16, fontFamily: MONO_FAMILY }}>
                 MMMWWW iiiiii
               </text>
             </div>

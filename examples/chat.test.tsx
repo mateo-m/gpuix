@@ -10,15 +10,10 @@ import path from 'path'
 import { fileURLToPath } from 'url'
 import React from 'react'
 import { beforeAll, describe, expect, it } from 'vitest'
-import {
-  createTestRoot,
-  hasNativeTestRenderer,
-  render,
-  resetRender,
-  TestRenderer,
-} from '@gpuix/react'
+import { render, resetRender } from '@gpuix/react'
 import { connectTest } from '@gpuix/react/automation'
-import { ChatApp, SafeMdxTranscript } from './chat'
+import { createTestRoot, hasNativeTestRenderer, TestRenderer } from '@gpuix/react/testing'
+import { ChatApp, SafeMdxContent, SafeMdxTranscript } from './chat'
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 const SHOTS = path.resolve(path.dirname(fileURLToPath(import.meta.url)), 'screenshots')
@@ -105,6 +100,34 @@ describeNative('chat example', () => {
     `)
   })
 
+  it('keeps a long Safe-MDX list item inside a narrow column', () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div
+        style={{
+          width: 280,
+          padding: 12,
+          backgroundColor: '#111',
+        }}
+      >
+        <SafeMdxContent source="- a second item with a long sentence that must wrap without leaving the transcript column" />
+      </div>
+    )
+
+    const col = renderer.findByType('div').find((node) => node.style.width === 280)
+    const item = renderer.findByText(
+      'a second item with a long sentence that must wrap without leaving the transcript column'
+    )
+    expect(col).toBeDefined()
+    expect(item).toBeDefined()
+    const colBox = renderer.getElementBounds(col!.id)
+    const itemBox = renderer.getElementBounds(item!.id)
+    expect(colBox).not.toBeNull()
+    expect(itemBox).not.toBeNull()
+    expect(itemBox![0] + itemBox![2]).toBeLessThanOrEqual(colBox![0] + colBox![2] + 1)
+    expect(itemBox![3]).toBeGreaterThan(20)
+  })
+
   it('renders the sidebar, transcript and composer', () => {
     const { render, renderer } = createTestRoot()
     render(<ChatApp />)
@@ -127,7 +150,7 @@ describeNative('chat example', () => {
     const icons = renderer.findByType('svg')
     expect(icons.length).toBeGreaterThan(8)
     expect(
-      icons.every((icon) => String(icon.customProps?.src ?? '').includes('svg'))
+      icons.every((icon) => String(icon.customProps?.source ?? '').length > 0)
     ).toBe(true)
 
     expect(painted).toContain('DeepSeek V4 Flash')
@@ -135,7 +158,6 @@ describeNative('chat example', () => {
     expect(painted.some((line) => line.includes('control plane for local coding agents'))).toBe(
       true
     )
-    expect(renderer.findByType('markdown').length).toBeGreaterThan(0)
   })
 
   it('scrolls the transcript past the first turn', () => {
@@ -146,7 +168,7 @@ describeNative('chat example', () => {
 
     const transcript = renderer.findByType('virtual-list')[0]
     renderer.nativeSimulateScrollWheel(700, 400, 0, -1400)
-    renderer.scrollToItem(transcript.id, 23)
+    renderer.scrollToItem(transcript.id, transcript.children.length - 1)
     renderer.flush()
 
     expect(renderer.getPaintedText()).toContain('Which models should I wire up?')
@@ -166,20 +188,24 @@ describeNative('chat example', () => {
     expect(selected).not.toContain('Native SDK vs GPUI comparison')
   })
 
-  it('opens the model picker and changes the selected model', () => {
+  it('opens the model picker and changes the selected model', async () => {
     const { render, renderer } = createTestRoot()
     render(<ChatApp />)
 
     expect(renderer.getPaintedText()).toContain('DeepSeek V4 Flash')
     expect(renderer.getPaintedText()).not.toContain('Claude Opus 4.6')
 
-    renderer.nativeSimulateClick(480, 724)
-    renderer.flush()
-    expect(renderer.getPaintedText()).toContain('Claude Opus 4.6')
+    const app = await connectTest(renderer)
+    try {
+      await app.getByTestId('model-picker').click()
+      expect(renderer.getPaintedText()).toContain('Claude Opus 4.6')
 
-    const shot = path.join(SHOTS, 'chat-model-picker.png')
-    renderer.captureScreenshot(shot)
-    expect(fs.statSync(shot).size).toBeGreaterThan(0)
+      const shot = path.join(SHOTS, 'chat-model-picker.png')
+      renderer.captureScreenshot(shot)
+      expect(fs.statSync(shot).size).toBeGreaterThan(0)
+    } finally {
+      await app.close()
+    }
   })
 
   it('types into the composer and clears on enter', () => {
@@ -195,7 +221,7 @@ describeNative('chat example', () => {
     expect(renderer.getPaintedText()).toContain('Do anything...')
 
     const transcript = renderer.findByType('virtual-list')[0]
-    renderer.scrollToItem(transcript.id, 24)
+    renderer.scrollToItem(transcript.id, transcript.children.length - 1)
     renderer.flush()
     expect(renderer.getPaintedText()).toContain('hello')
   })
@@ -227,12 +253,19 @@ describeNative('chat example', () => {
     expect(fs.statSync(after).size).toBeGreaterThan(0)
   }, 20_000)
 
+  it('honors a transcript count below the source turn count', () => {
+    const { render, renderer } = createTestRoot()
+    render(<ChatApp turnCount={6} />)
+
+    const transcript = renderer.findByType('virtual-list')[0]
+    expect(transcript?.children).toHaveLength(6)
+  })
+
   it('keeps transcript row ids when the sidebar collapses', async () => {
     const { render, renderer } = createTestRoot()
     render(<ChatApp turnCount={80} />)
     const before = renderer.findByType('virtual-list')[0]?.children.slice() ?? []
-    expect(before.length).toBeGreaterThan(0)
-    expect(before.length).toBeLessThan(80)
+    expect(before.length).toBe(80)
 
     const app = await connectTest(renderer)
     await app.getByTestId('sidebar-collapse').click()

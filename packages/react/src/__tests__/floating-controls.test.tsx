@@ -25,9 +25,10 @@ import {
   TooltipContent,
   TooltipProvider,
   TooltipTrigger,
-  createTestRoot,
-  hasNativeTestRenderer,
 } from "../index"
+// `../index` does not re-export the test helpers, so importing them from there
+// left `hasNativeTestRenderer` undefined and skipped this whole suite silently.
+import { createTestRoot, hasNativeTestRenderer } from "../testing"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 

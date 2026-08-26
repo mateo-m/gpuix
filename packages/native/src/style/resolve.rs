@@ -412,8 +412,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
     if let Some(ml) = scope.number(&style.margin_left) {
         el = el.ml(gpui::px(ml as f32));
     }
+    // Taffy has no viewport-fixed position, and GPUI has no scrolling document,
+    // so "fixed" lays out exactly like "absolute". `should_occlude` already
+    // treats the two the same. Without this arm a "fixed" box stayed in flow.
     match style.position.as_deref() {
-        Some("absolute") => el = el.absolute(),
+        Some("absolute") | Some("fixed") => el = el.absolute(),
         Some("relative") => el = el.relative(),
         _ => {}
     }
@@ -466,10 +469,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
             el = el.line_clamp(clamp as usize);
         }
     }
-    // `lineHeight` follows CSS: a bare number is a multiple of the font size,
-    // and a length is that length. GPUI's `DefiniteLength` carries both, so
-    // neither form needs the font size here.
-    if let Some(line_height) = scope.length(&style.line_height) {
+    // A JS number is pixels, so `lineHeight: 20` is 20px as in the upstream
+    // API. A string follows CSS: a bare number is a multiple of the font
+    // size, and a length is that length.
+    if let Some(crate::style::Numeric::Number(pixels)) = style.line_height {
+        if pixels > 0.0 {
+            el = el.line_height(gpui::px(pixels as f32));
+        }
+    } else if let Some(line_height) = scope.length(&style.line_height) {
         match line_height {
             gpuix_css::length::Length::Number(multiple)
             | gpuix_css::length::Length::Fraction(multiple)
@@ -568,7 +575,7 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
 /// Parse a CSS font-weight value (string or number) into a GPUI FontWeight.
 /// Accepts named keywords ("bold", "semibold"), numeric strings ("700"),
 /// and raw numbers (700). Falls back to 400 (normal) for unrecognized values.
-fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::FontWeight {
+pub(crate) fn parse_font_weight(value: &crate::style::FontWeightValue) -> gpui::FontWeight {
     match value {
         crate::style::FontWeightValue::Num(n) => gpui::FontWeight((*n as f32).clamp(1.0, 1000.0)),
         crate::style::FontWeightValue::Str(s) => {
@@ -809,17 +816,23 @@ mod tests {
     }
 
     #[test]
-    fn a_bare_line_height_is_a_multiple_of_the_font_size() {
+    fn a_bare_line_height_in_a_string_is_a_multiple_of_the_font_size() {
         // CSS reads `line-height: 1.5` as one and a half times the font size.
         // Reading it as 1.5 pixels would collapse every line onto the last.
         assert_eq!(line_height_of("1.5"), Some(gpui::relative(1.5)));
+    }
+
+    #[test]
+    fn a_numeric_line_height_is_pixels() {
+        // The upstream API reads `lineHeight: 20` as 20 pixels, like React
+        // Native. Only a string value gets the CSS multiple reading.
         let numeric = StyleDesc {
-            line_height: Some(crate::style::Numeric::Number(1.5)),
+            line_height: Some(crate::style::Numeric::Number(20.0)),
             ..Default::default()
         };
         assert_eq!(
             Resolved::build(&numeric, &no_variables()).base.text.line_height,
-            Some(gpui::relative(1.5))
+            Some(gpui::px(20.0).into())
         );
     }
 

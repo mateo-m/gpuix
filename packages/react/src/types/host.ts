@@ -61,6 +61,41 @@ export interface MotionProps {
   transition?: MotionTransition
 }
 
+/**
+ * CSS `cursor` keywords GPUI can paint. An unlisted keyword is ignored, like
+ * every other invalid style value.
+ */
+export type CursorValue =
+  | "default"
+  | "auto"
+  | "pointer"
+  | "text"
+  | "vertical-text"
+  | "crosshair"
+  | "grab"
+  | "grabbing"
+  | "move"
+  | "all-scroll"
+  | "col-resize"
+  | "row-resize"
+  | "ew-resize"
+  | "ns-resize"
+  | "nwse-resize"
+  | "nesw-resize"
+  | "n-resize"
+  | "e-resize"
+  | "s-resize"
+  | "w-resize"
+  | "ne-resize"
+  | "nw-resize"
+  | "se-resize"
+  | "sw-resize"
+  | "not-allowed"
+  | "no-drop"
+  | "alias"
+  | "copy"
+  | "context-menu"
+
 export interface BoxShadow {
   offsetX: number
   offsetY: number
@@ -217,15 +252,10 @@ export interface StyleDesc {
   overflowX?: string
   overflowY?: string
 
-  /**
-   * A CSS cursor keyword: `default`, `pointer`, `text`, `vertical-text`,
-   * `crosshair`, `grab`, `grabbing`, `not-allowed`, `no-drop`, `col-resize`,
-   * `row-resize`, the eight `*-resize` directions, `alias`, `copy` and
-   * `context-menu`. `auto` and other words set nothing, so the element keeps
-   * the cursor of its parent. Selectable text shows the I-beam under `auto`.
-   */
-  cursor?: string
-  /** `"auto"` blocks hits behind this element. `"none"` never does. Unset blocks when the element paints a fill or is absolutely positioned. */
+  cursor?: CursorValue
+  /** `"auto"` blocks hits behind this element **and its wheel**. `"none"` never
+   *  blocks. Unset blocks clicks when the element paints a fill or is
+   *  positioned, but lets the wheel reach the ancestor scroller, like HTML. */
   pointerEvents?: "auto" | "none"
 
   /** "none" opts this element and its subtree out of text selection.
@@ -316,14 +346,9 @@ export interface SyntaxTheme {
  * heading scale is a React re-render and needs no native rebuild.
  */
 export interface GpuixMetrics {
-  // Code blocks
+  // Code blocks. Shared by <code> and the markdown fenced block.
   codeTextSize?: number
   codeLineHeight?: number
-  codePaddingX?: number
-  codePaddingY?: number
-  codeRadius?: number
-  codeHeaderPaddingY?: number
-  codeHeaderTextSize?: number
   codeGutterDigitWidth?: number
   codeGutterPaddingRight?: number
   codeGutterMinWidth?: number
@@ -351,6 +376,15 @@ export interface GpuixMetrics {
   mdTableMinColumnWidth?: number
   mdTableMinColumnContent?: number
   mdInlineCodeRadius?: number
+  /**
+   * The fenced-block card. `<code>` paints no card, so these are
+   * markdown-only: style a `<code>` block with its own `style` prop instead.
+   */
+  mdCodePaddingX?: number
+  mdCodePaddingY?: number
+  mdCodeRadius?: number
+  mdCodeHeaderPaddingY?: number
+  mdCodeHeaderTextSize?: number
 }
 
 /**
@@ -378,10 +412,76 @@ export interface GpuixTheme {
   metrics?: GpuixMetrics
 }
 
+/** One `highlight` entry. See `Props.highlight`. */
+export interface HighlightSpec {
+  /**
+   * Substring to match. Case-insensitive unless `caseSensitive` is set.
+   *
+   * A match never crosses a line, exactly like browser find. It DOES cross the
+   * several host nodes React makes for one interpolated line, so
+   * `<text>Hello {name}!</text>` matches `Hello Tommy`.
+   */
+  query?: string
+  caseSensitive?: boolean
+  /** Only match when neither neighbour is alphanumeric or `_`. */
+  wholeWord?: boolean
+  /**
+   * Explicit `[start, end)` pairs in UTF-16 code units, the units `indexOf` and
+   * `RegExp.exec` return. They index the declaring subtree's text, with a
+   * newline between lines.
+   *
+   * A pair that splits a surrogate pair is rejected, not snapped. Native text
+   * (`<code>`, `<markdown>`, `<diff>`) is not part of that text; use `query`.
+   */
+  ranges?: Array<[number, number]>
+  /** Any CSS colour. Defaults to the theme accent at 30% alpha. */
+  color?: string
+  /** Colour for the match at `activeIndex`. Defaults to accent at 65%. */
+  activeColor?: string
+  /** Index of the match to highlight differently, for a find-bar cursor. */
+  activeIndex?: number
+  /**
+   * How many MATCHES come before this subtree in your document, so `activeIndex`
+   * is compared against `matchIndexOffset + n` for the nth match here.
+   *
+   * It is a match count, not a row index. Rows hold different numbers of
+   * matches, so a row index cannot stand in for it.
+   *
+   * Only needed for virtualized content: a `<virtual-list>` mounts a window of
+   * its rows, so native can only number what that window contains. Sum
+   * `findRanges` over the rows before `windowStart`. Defaults to 0.
+   *
+   * A negative or fractional value is refused and the whole spec is dropped,
+   * because a bad offset silently marks the wrong match.
+   */
+  matchIndexOffset?: number
+  /** Corner radius of the wash. Defaults to 2. */
+  radius?: number
+}
+
+/** One highlight wash painted in the last frame. Test-facing. */
+export interface HighlightMatch {
+  elementId: number
+  /** Index of the run within that element. 0 for a plain `<text>`. */
+  sub: number
+  /** The run's full string, so `text.slice(start, end)` is the match. */
+  text: string
+  start: number
+  end: number
+  active: boolean
+  /** One box per visual row, so a soft-wrapped match has two. */
+  rects: Array<{ x: number; y: number; width: number; height: number }>
+}
+
 // Props passed to elements.
 // Element IDs are auto-generated numeric IDs (not user-settable).
 // Use React refs to get an element's ID: ref.current.id
 export interface Props {
+  // `key` must live here, not in `JSX.IntrinsicAttributes`. TypeScript 5 ignores
+  // that member for intrinsic elements, and React's DOM types work only because
+  // `DetailedHTMLProps` already carries `key`. Without this field every
+  // `<div key={...} />` inside a `.map()` fails to typecheck.
+  key?: React.Key | null
   style?: StyleDesc
   /**
    * Class tokens, separated by spaces, read by the root's resolver.
@@ -395,7 +495,10 @@ export interface Props {
   ref?: React.Ref<PublicInstance>
 
   // ── Mouse events ───────────────────────────────────────────────
+  /** Primary button only, like the DOM. Use `onAuxClick` for the others. */
   onClick?: (event: EventPayload) => void
+  /** Non-primary click, like the DOM `auxclick`. `isRightClick` says which. */
+  onAuxClick?: (event: EventPayload) => void
   onMouseDown?: (event: EventPayload) => void
   onMouseUp?: (event: EventPayload) => void
   onMouseEnter?: (event: EventPayload) => void
@@ -425,6 +528,18 @@ export interface Props {
   onLineClick?: (event: EventPayload) => void
   onLinkClick?: (event: EventPayload) => void
   onVisibleRange?: (event: EventPayload) => void
+  /** Match count changed for this element's `highlight`. See `matchCount`. */
+  onHighlight?: (event: EventPayload) => void
+
+  // ── Highlight ──────────────────────────────────────────────────
+  /**
+   * Paint a background wash behind matched or explicitly given text ranges.
+   *
+   * Scoped by position: on the root it searches the window, on a container it
+   * searches that container. The nearest declaration wins, so a nested
+   * `highlight` replaces an ancestor's for its own subtree.
+   */
+  highlight?: HighlightSpec | HighlightSpec[] | null
 
   // ── Focus props ────────────────────────────────────────────────
   /** Take keyboard focus when the element first mounts. Required for `<input>`:
@@ -452,21 +567,30 @@ export interface TextareaProps extends InputProps {
   maxRows?: number
 }
 
-/** A variable-height list that builds only rows near its viewport. */
-export interface VirtualListProps {
+type VirtualListShared = {
+  // See the note on `Props.key`.
+  key?: React.Key | null
   style?: StyleDesc
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
   alignment?: "top" | "bottom"
   followTail?: boolean
   overdraw?: number
-  estimatedItemHeight?: number
-  /** Logical row count. When set, `children` is only the mounted window. */
-  itemCount?: number
-  /** Logical index of `children[0]`. Ignored when `itemCount` is unset. */
-  windowStart?: number
   onVisibleRange?: (event: EventPayload) => void
 }
+
+/** A variable-height list that builds only rows near its viewport. */
+export type VirtualListProps =
+  | (VirtualListShared & {
+      estimatedItemHeight?: number
+      itemCount?: never
+      windowStart?: never
+    })
+  | (VirtualListShared & {
+      itemCount: number
+      estimatedItemHeight: number
+      windowStart?: number
+    })
 
 // Props for native <img> rendering.
 export interface ImgProps extends Props {
@@ -475,12 +599,26 @@ export interface ImgProps extends Props {
   alt?: string
 }
 
-// Props for monochrome SVGs loaded from local files and tinted by style.color.
+// Props for monochrome SVGs tinted by style.color.
 export interface SvgProps extends Props {
+  /** Desktop local path. Use source for portable browser rendering. */
   src?: string
+  /** Raw SVG markup rendered directly by GPUI. */
+  source?: string
 }
 
-// Props for the <code> custom element — a syntax-highlighted code block.
+/**
+ * Props for the <code> custom element — a syntax-highlighted code block.
+ *
+ * It paints **no surface of its own**: no fill, border, radius, padding or
+ * language header. `style` is the surface, and `fontFamily`, `fontSize`,
+ * `fontWeight`, `lineHeight` and `color` there beat the theme. Wrap it, or
+ * style it, to get a card.
+ *
+ * Rows are a fixed height, so `fontSize` alone scales that height by the
+ * theme's ratio. Lines never wrap and the block is its own horizontal
+ * scroller, so `whiteSpace` and `overflowX` do nothing.
+ */
 export interface CodeProps extends Props {
   /** The source to display. Rendered one div per line at an exact line height. */
   code?: string
@@ -489,8 +627,6 @@ export interface CodeProps extends Props {
   /** File path, used for extension-based language detection. */
   path?: string
   showLineNumbers?: boolean
-  /** Header strip with the language tag. Defaults to true when `language` is set. */
-  showHeader?: boolean
   theme?: GpuixTheme
 }
 
@@ -588,8 +724,15 @@ export interface NativeRenderer {
   /** Drop the current selection. */
   clearSelection?(): void
 
+  // ── Highlight API ──────────────────────────────────────────────
+  /** Every highlight wash painted in the last frame, in paint order.
+   *  A quad never appears in getPaintedText(), so this is how `highlight`
+   *  is asserted without a screenshot. */
+  getPaintedHighlights?(): HighlightMatch[]
+
   // ── Window API ─────────────────────────────────────────────────
   getWindowSize?(): { width: number; height: number }
+  getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
@@ -599,6 +742,19 @@ export interface NativeRenderer {
 }
 
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
+
+export interface EdgeInsets {
+  top: number
+  right: number
+  bottom: number
+  left: number
+}
+
+export interface NativeWindowInsets {
+  safeArea: EdgeInsets
+  ime: EdgeInsets
+  effective: EdgeInsets
+}
 
 export interface DebugFrameOverlayStats {
   currentMs?: number
