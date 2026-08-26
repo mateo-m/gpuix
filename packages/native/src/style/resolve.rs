@@ -854,7 +854,9 @@ mod tests {
         let scope = variables(&[("--brand", "#ff0000")]);
         let resolved = Resolved::build(&style, &scope);
         assert_eq!(
-            resolved.state(State::Hover).and_then(|h| h.background.clone()),
+            resolved
+                .state(State::Hover)
+                .and_then(|h| h.background.clone()),
             fill("#ff0000")
         );
     }
@@ -940,7 +942,10 @@ mod tests {
             line_height: Some(crate::style::Numeric::Text(text.to_string())),
             ..Default::default()
         };
-        Resolved::build(&style, &no_variables()).base.text.line_height
+        Resolved::build(&style, &no_variables())
+            .base
+            .text
+            .line_height
     }
 
     #[test]
@@ -953,7 +958,10 @@ mod tests {
             ..Default::default()
         };
         assert_eq!(
-            Resolved::build(&numeric, &no_variables()).base.text.line_height,
+            Resolved::build(&numeric, &no_variables())
+                .base
+                .text
+                .line_height,
             Some(gpui::relative(1.5))
         );
     }

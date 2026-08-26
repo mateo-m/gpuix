@@ -425,9 +425,7 @@ async fn run_ui_commands(
                     let now_ms = match control {
                         ClockControl::Pause => view.clock.pause(),
                         ClockControl::Set(now_ms) => view.clock.set_ms(now_ms),
-                        ClockControl::FastForward(delta_ms) => {
-                            view.clock.fast_forward_ms(delta_ms)
-                        }
+                        ClockControl::FastForward(delta_ms) => view.clock.fast_forward_ms(delta_ms),
                         ClockControl::Resume => view.clock.resume(),
                     };
                     cx.notify();
@@ -1942,7 +1940,6 @@ impl GpuixView {
     }
 }
 
-
 impl GpuixView {
     /// Sync focus handles with the current element tree.
     /// Creates handles for new focusable elements, subscribes on_focus/on_blur,
@@ -2132,7 +2129,6 @@ impl gpui::Render for GpuixView {
     }
 }
 
-
 // ── Event emission ───────────────────────────────────────────────────
 
 /// Helper to convert a GPUI Point<Pixels> to (f64, f64).
@@ -2170,7 +2166,6 @@ pub(crate) fn emit_event_full(
         cb(payload);
     }
 }
-
 
 // ── Types ────────────────────────────────────────────────────────────
 

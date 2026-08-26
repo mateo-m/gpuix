@@ -46,12 +46,7 @@ pub(crate) struct Scope<'a> {
 }
 
 impl<'a> Scope<'a> {
-    pub fn new(
-        variables: &'a Variables,
-        current_color: Rgba,
-        dark: bool,
-        rem_size: f32,
-    ) -> Self {
+    pub fn new(variables: &'a Variables, current_color: Rgba, dark: bool, rem_size: f32) -> Self {
         Self {
             variables,
             current_color,
@@ -541,7 +536,10 @@ mod tests {
     fn a_bare_number_needs_no_resolving() {
         let variables = scope_of(&[]);
         let scope = Scope::new(&variables, Rgba::BLACK, false, 16.0);
-        assert_eq!(scope.number(&Some(crate::style::Numeric::Number(8.0))), Some(8.0));
+        assert_eq!(
+            scope.number(&Some(crate::style::Numeric::Number(8.0))),
+            Some(8.0)
+        );
         assert!(!scope.used_a_variable());
     }
 
@@ -612,10 +610,22 @@ mod tests {
         use crate::style::{DimensionValue, Numeric};
         let text = |t: &str| Some(Numeric::Text(t.to_string()));
 
-        assert_eq!(dimension(Some(Numeric::Number(200.0)), &[]), Some(DimensionValue::Pixels(200.0)));
-        assert_eq!(dimension(text("200px"), &[]), Some(DimensionValue::Pixels(200.0)));
-        assert_eq!(dimension(text("6rem"), &[]), Some(DimensionValue::Pixels(96.0)));
-        assert_eq!(dimension(text("calc(100px + 2rem)"), &[]), Some(DimensionValue::Pixels(132.0)));
+        assert_eq!(
+            dimension(Some(Numeric::Number(200.0)), &[]),
+            Some(DimensionValue::Pixels(200.0))
+        );
+        assert_eq!(
+            dimension(text("200px"), &[]),
+            Some(DimensionValue::Pixels(200.0))
+        );
+        assert_eq!(
+            dimension(text("6rem"), &[]),
+            Some(DimensionValue::Pixels(96.0))
+        );
+        assert_eq!(
+            dimension(text("calc(100px + 2rem)"), &[]),
+            Some(DimensionValue::Pixels(132.0))
+        );
         assert_eq!(
             dimension(text("calc(var(--spacing) * 30)"), &[("--spacing", "4px")]),
             Some(DimensionValue::Pixels(120.0))
@@ -627,10 +637,16 @@ mod tests {
         use crate::style::{DimensionValue, Numeric};
         let text = |t: &str| Some(Numeric::Text(t.to_string()));
 
-        assert_eq!(dimension(text("50%"), &[]), Some(DimensionValue::Percentage(0.5)));
+        assert_eq!(
+            dimension(text("50%"), &[]),
+            Some(DimensionValue::Percentage(0.5))
+        );
         assert_eq!(dimension(text("auto"), &[]), Some(DimensionValue::Auto));
         assert_eq!(dimension(text("AUTO"), &[]), Some(DimensionValue::Auto));
-        assert_eq!(dimension(text("var(--w)"), &[("--w", "auto")]), Some(DimensionValue::Auto));
+        assert_eq!(
+            dimension(text("var(--w)"), &[("--w", "auto")]),
+            Some(DimensionValue::Auto)
+        );
     }
 
     #[test]
@@ -649,6 +665,9 @@ mod tests {
     #[test]
     fn an_absent_declaration_stays_absent() {
         let variables = scope_of(&[]);
-        assert_eq!(Scope::new(&variables, Rgba::BLACK, false, 16.0).number(&None), None);
+        assert_eq!(
+            Scope::new(&variables, Rgba::BLACK, false, 16.0).number(&None),
+            None
+        );
     }
 }
