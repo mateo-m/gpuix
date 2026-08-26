@@ -610,7 +610,10 @@ mod tests {
         let written = serde_json::to_value(StyleDesc::default()).unwrap();
         let written = written.as_object().unwrap();
         for name in written.keys() {
-            assert!(FIELDS.contains(&name.as_str()), "`{name}` is written but never read");
+            assert!(
+                FIELDS.contains(&name.as_str()),
+                "`{name}` is written but never read"
+            );
         }
         assert_eq!(written.len(), FIELDS.len());
     }
@@ -633,7 +636,10 @@ mod tests {
         assert_eq!(style.gap, Some(Numeric::Text("var(--gap)".to_owned())));
         assert_eq!(style.width, Some(Numeric::Text("100%".to_owned())));
         assert_eq!(style.height, Some(Numeric::Text("auto".to_owned())));
-        assert_eq!(style.font_weight, Some(FontWeightValue::Str("bold".to_owned())));
+        assert_eq!(
+            style.font_weight,
+            Some(FontWeightValue::Str("bold".to_owned()))
+        );
         assert_eq!(style.line_clamp, None);
         assert_eq!(style.hover.unwrap().color.as_deref(), Some("red"));
     }
@@ -659,12 +665,16 @@ mod tests {
         let style: StyleDesc =
             serde_json::from_str(r#"{ "gap": 4, "gap": 8, "--pad": 1, "--pad": 2 }"#).unwrap();
         assert_eq!(style.gap, Some(Numeric::Number(8.0)));
-        assert_eq!(declared_variables(&style), vec![("--pad".to_owned(), "2".to_owned())]);
+        assert_eq!(
+            declared_variables(&style),
+            vec![("--pad".to_owned(), "2".to_owned())]
+        );
     }
 
     #[test]
     fn the_boxed_read_and_the_ordinary_read_agree() {
-        let json = r#"{ "gap": 8, "color": "red", "--pad": "4px", "hover": { "gap": 2 }, "nope": 1 }"#;
+        let json =
+            r#"{ "gap": 8, "color": "red", "--pad": "4px", "hover": { "gap": 2 }, "nope": 1 }"#;
         assert_eq!(
             *StyleDesc::from_json_boxed(json).unwrap(),
             serde_json::from_str::<StyleDesc>(json).unwrap()
@@ -683,7 +693,9 @@ mod tests {
             font_size: Some(Numeric::Number(14.0)),
             max_width: Some(Numeric::Number(320.0)),
             user_select: Some("none".to_owned()),
-            custom: [("--pad".to_owned(), serde_json::json!("8px"))].into_iter().collect(),
+            custom: [("--pad".to_owned(), serde_json::json!("8px"))]
+                .into_iter()
+                .collect(),
             hover: Some(Box::new(StyleDesc {
                 background_color: Some("#fff".to_owned()),
                 ..Default::default()

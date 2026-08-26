@@ -94,11 +94,27 @@ pub(super) fn build_element(
     let built = match element.element_type.as_str() {
         "div" => {
             ctx.custom_registry.destroy(id);
-            build_div(element, style, resolved.clone(), motion.as_ref(), ctx, window, cx)
+            build_div(
+                element,
+                style,
+                resolved.clone(),
+                motion.as_ref(),
+                ctx,
+                window,
+                cx,
+            )
         }
         "text" => {
             ctx.custom_registry.destroy(id);
-            build_text(element, style, resolved.clone(), motion.as_ref(), ctx, window, cx)
+            build_text(
+                element,
+                style,
+                resolved.clone(),
+                motion.as_ref(),
+                ctx,
+                window,
+                cx,
+            )
         }
         "virtual-list" => {
             ctx.custom_registry.destroy(id);
@@ -136,13 +152,8 @@ pub(super) fn build_element(
                 selection_wash: crate::color::to_hsla(cascade.selection_wash()),
                 cascade: cascade.clone(),
             };
-            ctx.custom_registry.render(
-                custom_type,
-                &element.custom_props,
-                render_ctx,
-                window,
-                cx,
-            )
+            ctx.custom_registry
+                .render(custom_type, &element.custom_props, render_ctx, window, cx)
         }
     };
 

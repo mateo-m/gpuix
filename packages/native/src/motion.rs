@@ -433,9 +433,9 @@ impl MotionState {
                 (Some(from), Some(target)) if raw < 1.0 => Some((from, target)),
                 _ => None,
             };
-            if let Some((from, target)) = ends.filter(|(from, target)| {
-                from.needs_content() || target.needs_content()
-            }) {
+            if let Some((from, target)) =
+                ends.filter(|(from, target)| from.needs_content() || target.needs_content())
+            {
                 let visible = from.mix(target, progress).resolve(old);
                 let end = target.resolve(new);
                 // The pixels a start needs so that mixing it toward `end` at
@@ -623,7 +623,7 @@ mod tests {
             "animate": { "cornerShape": "square" },
             "transition": { "duration": 1.0, "ease": "linear" }
         });
-        let mut state = MotionState::new(&spec, started).unwrap();
+        let state = MotionState::new(&spec, started).unwrap();
         let frame = state.frame(started + Duration::from_millis(500));
         let mut style = StyleDesc::default();
         frame.style.apply_to(&mut style);
@@ -706,8 +706,14 @@ mod tests {
         let state = MotionState::new(&description, started).unwrap();
 
         assert_eq!(at(state.frame(started)), Some(0.0));
-        assert_eq!(at(state.frame(started + Duration::from_millis(500))), Some(100.0));
-        assert_eq!(at(state.frame(started + Duration::from_secs(1))), Some(200.0));
+        assert_eq!(
+            at(state.frame(started + Duration::from_millis(500))),
+            Some(100.0)
+        );
+        assert_eq!(
+            at(state.frame(started + Duration::from_secs(1))),
+            Some(200.0)
+        );
     }
 
     #[test]
@@ -729,7 +735,10 @@ mod tests {
         state.sync(&closing, settled).unwrap();
 
         assert_eq!(at(state.frame(settled)), Some(200.0));
-        assert_eq!(at(state.frame(settled + Duration::from_millis(500))), Some(100.0));
+        assert_eq!(
+            at(state.frame(settled + Duration::from_millis(500))),
+            Some(100.0)
+        );
         assert_eq!(at(state.frame(settled + Duration::from_secs(1))), Some(0.0));
     }
 
@@ -753,7 +762,10 @@ mod tests {
 
         // Half open when it turned, so the collapse starts at half.
         assert_eq!(at(state.frame(turned)), Some(100.0));
-        assert_eq!(at(state.frame(turned + Duration::from_millis(500))), Some(50.0));
+        assert_eq!(
+            at(state.frame(turned + Duration::from_millis(500))),
+            Some(50.0)
+        );
     }
 
     #[test]
