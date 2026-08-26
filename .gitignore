@@ -1,10 +1,15 @@
 node_modules/
 target/
 dist/
+*.tsbuildinfo
 *.node
 .DS_Store
 opensrc
 tmp/
 screenshots/
+packages/native/wasm/
+# `bun scripts/web.ts` writes the browser bundle and the Wasm blob here, the
+# same generated pair as packages/native/wasm above.
+examples/web-dist/
 # Test output churns every run; the curated set the README links to lives in
 # docs/images and is regenerated with `bun scripts/screenshots.ts`.

@@ -21,13 +21,32 @@ beforeAll(() => {
   fs.mkdirSync(SHOTS_DIR, { recursive: true })
 })
 
+/** Default `codeLineHeight`. One row per source line, at this exact height. */
+const LINE_HEIGHT = 18
+
+function codeBounds(renderer: { findByType(type: string): { id: number }[]; getElementBounds(id: number): number[] | null }) {
+  const node = renderer.findByType("code")[0]
+  expect(node).toBeDefined()
+  const bounds = renderer.getElementBounds(node!.id)
+  expect(bounds).not.toBeNull()
+  return { x: bounds![0]!, y: bounds![1]!, width: bounds![2]!, height: bounds![3]! }
+}
+
 describe("<code>", () => {
   it("renders one row per source line", () => {
     const { render, renderer } = createTestRoot()
     render(<code code={"a\nb\nc"} language="ts" />)
 
-    // The language header paints first, then one entry per line.
-    expect(renderer.getPaintedText()).toEqual(["ts", "a", "b", "c"])
+    // Only the code paints. No language header, no chrome of any kind.
+    expect(renderer.getPaintedText()).toEqual(["a", "b", "c"])
+  })
+
+  it("paints no surface of its own", () => {
+    const { render, renderer } = createTestRoot()
+    render(<code code={"a\nb\nc"} language="ts" />)
+
+    // Exactly the rows: no padding, no header strip, no border.
+    expect(codeBounds(renderer).height).toBe(3 * LINE_HEIGHT)
   })
 
   it("keeps JSON-looking source strings as source text", () => {
@@ -45,25 +64,65 @@ describe("<code>", () => {
     expect(renderer.findByType("code")).toHaveLength(1)
   })
 
-  it("shows the language header only when a language is given", () => {
-    const withLanguage = createTestRoot()
-    withLanguage.render(<code code="x = 1" language="python" />)
-    expect(withLanguage.renderer.getPaintedText()).toContain("python")
-
-    const withoutLanguage = createTestRoot()
-    withoutLanguage.render(<code code="x = 1" />)
-    expect(withoutLanguage.renderer.getPaintedText()).not.toContain("python")
+  it("never paints the language as a header", () => {
+    const { render, renderer } = createTestRoot()
+    render(<code code="x = 1" language="python" />)
+    expect(renderer.getPaintedText()).not.toContain("python")
   })
 
-  it("hides the header when showHeader is false", () => {
+  it("grows by the padding from the style prop", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code="x = 1" language="python" showHeader={false} />)
-    expect(renderer.getPaintedText()).not.toContain("python")
+    render(<code code={"a\nb\nc"} language="ts" style={{ padding: 20 }} />)
+
+    expect(codeBounds(renderer).height).toBe(3 * LINE_HEIGHT + 40)
+  })
+
+  it("takes the line height and font size from the style prop", () => {
+    const { render, renderer } = createTestRoot()
+    render(<code code={"a\nb\nc"} language="ts" style={{ fontSize: 20, lineHeight: 30 }} />)
+
+    // The row height follows style.lineHeight, so tall glyphs are never clipped.
+    expect(codeBounds(renderer).height).toBe(3 * 30)
+  })
+
+  it("scales the rows when only fontSize is given", () => {
+    const { render, renderer } = createTestRoot()
+    // Double the glyphs and the rows must double too, or the lines overlap.
+    render(<code code={"a\nb\nc"} language="ts" style={{ fontSize: 25 }} />)
+
+    expect(codeBounds(renderer).height).toBe(3 * 2 * LINE_HEIGHT)
+  })
+
+  it("paints the fill from the style prop", () => {
+    const bare = path.join(SHOTS_DIR, "code-style-bare.png")
+    const filled = path.join(SHOTS_DIR, "code-style-filled.png")
+
+    const a = createTestRoot()
+    a.render(
+      <div style={{ display: "flex", padding: 24, backgroundColor: "#060606", height: "100%" }}>
+        <code code={TS_SOURCE} language="typescript" />
+      </div>
+    )
+    a.renderer.captureScreenshot(bare)
+
+    const b = createTestRoot()
+    b.render(
+      <div style={{ display: "flex", padding: 24, backgroundColor: "#060606", height: "100%" }}>
+        <code
+          code={TS_SOURCE}
+          language="typescript"
+          style={{ padding: 12, borderRadius: 10, backgroundColor: "#1d1d1d" }}
+        />
+      </div>
+    )
+    b.renderer.captureScreenshot(filled)
+
+    expectScreenshotsDiffer(bare, filled)
   })
 
   it("renders line numbers when asked", () => {
     const { render, renderer } = createTestRoot()
-    render(<code code={"a\nb\nc"} language="ts" showHeader={false} showLineNumbers />)
+    render(<code code={"a\nb\nc"} language="ts" showLineNumbers />)
 
     // Gutter numbers paint before their line, so the log interleaves them.
     expect(renderer.getPaintedText()).toEqual(["1", "a", "2", "b", "3", "c"])
@@ -73,11 +132,11 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"const answer = 42"} language="ts" showHeader={false} />
+        <code code={"const answer = 42"} language="ts" />
       </div>
     )
 
-    const selected = renderer.dragSelect(35, 42, 900, 42)
+    const selected = renderer.dragSelect(22, 25, 900, 42)
     expect(selected).toBe("const answer = 42")
   })
 
@@ -85,11 +144,11 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"one\ntwo\nthree"} language="ts" showHeader={false} />
+        <code code={"one\ntwo\nthree"} language="ts" />
       </div>
     )
 
-    const selected = renderer.dragSelect(35, 42, 900, 500)
+    const selected = renderer.dragSelect(22, 25, 900, 500)
     expect(selected).toBe("one\ntwo\nthree")
   })
 
@@ -97,12 +156,12 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"alpha\nbeta"} language="ts" showHeader={false} showLineNumbers />
+        <code code={"alpha\nbeta"} language="ts" showLineNumbers />
       </div>
     )
 
     // Anchor inside the code column, past the gutter, and drag to the end.
-    const selected = renderer.dragSelect(70, 42, 900, 500)
+    const selected = renderer.dragSelect(70, 25, 900, 500)
     // The gutter painted this frame, but a drag must never pick it up: the
     // exact anchor column is font-dependent, the absence of digits is not.
     expect(renderer.getPaintedText()).toContain("1")
@@ -114,11 +173,11 @@ describe("<code>", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
-        <code code={"alpha\nbeta"} language="ts" showHeader={false} showLineNumbers />
+        <code code={"alpha\nbeta"} language="ts" showLineNumbers />
       </div>
     )
 
-    const selected = renderer.dragSelect(24, 42, 900, 500)
+    const selected = renderer.dragSelect(24, 25, 900, 500)
     expect(selected).toBe("alpha\nbeta")
   })
 
@@ -170,7 +229,19 @@ describe("<code>", () => {
           height: "100%",
         }}
       >
-        <code code={TS_SOURCE} language="typescript" showLineNumbers />
+        {/* The card is the caller's, built from `style` alone. */}
+        <code
+          code={TS_SOURCE}
+          language="typescript"
+          showLineNumbers
+          style={{
+            padding: 12,
+            borderRadius: 10,
+            borderWidth: 1,
+            borderColor: "#ffffff1f",
+            backgroundColor: "#ffffff09",
+          }}
+        />
       </div>
     )
     renderer.captureScreenshot(shot)

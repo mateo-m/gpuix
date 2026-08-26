@@ -73,11 +73,6 @@ impl CustomElement for MarkdownElement {
 
         let theme = self.theme.clone();
         let tree = self.tree();
-        if tree.is_empty() {
-            let mut empty = gpui::div();
-            empty = ctx.styled(empty);
-            return empty.into_any_element();
-        }
 
         // Link clicks are hit-tested per byte range inside the painted text, so
         // clicking prose emits nothing and clicking the second link emits the
@@ -102,6 +97,7 @@ impl CustomElement for MarkdownElement {
             ctx.selection_wash,
             theme.clone(),
             on_link,
+            ctx.highlight_set.clone(),
         );
         let body = render_tree(&tree, &mut md, window);
 
@@ -109,6 +105,8 @@ impl CustomElement for MarkdownElement {
             .id(SharedString::from(format!("__gpuix_markdown_{}", ctx.id)))
             .flex()
             .flex_col()
+            .w_full()
+            .min_w_0()
             .text_color(theme.text)
             .font_family(theme.font_sans.clone())
             .text_size(gpui::px(theme.metrics.md_text_size))

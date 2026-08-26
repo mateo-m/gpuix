@@ -12,7 +12,7 @@ use super::{emit_event_full, mouse_button_to_u32, point_to_xy, EventCallback, Gp
 use crate::custom_elements::{CustomElementRegistry, CustomRenderContext};
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
-use crate::text::{selectable_text, selection_key, SharedSelection};
+use crate::text::{selectable_text, SharedSelection};
 
 /// Everything `build_element` threads through the tree.
 ///
@@ -34,6 +34,20 @@ pub(super) struct BuildCtx<'a> {
     /// inherits it. The renderer's own theme only seeds the root selection
     /// wash. Custom elements resolve their own theme from their `theme` prop.
     pub cascade: crate::inheritance::Inherited,
+    /// The nearest ancestor's `highlight`, resolved. `None` in every app that
+    /// does not use search. It carries the declaring element id, which is what
+    /// a virtual-list row re-resolves against: that row is built after the root
+    /// render returns, and on Windows and Linux the Node thread can edit text
+    /// in between, so a stale range would paint over the wrong glyphs.
+    pub highlight: Option<std::sync::Arc<crate::text::HighlightContext>>,
+    /// Persistent `highlight` caches, keyed by the declaring element.
+    pub highlights: &'a mut HashMap<u64, super::HighlightCacheEntry>,
+    /// `onHighlight` payloads queued during the build.
+    ///
+    /// Never emitted inline: a handler that calls `setState` repaints, which
+    /// would re-enter the build and emit again. They are flushed once the root
+    /// build has returned.
+    pub highlight_events: &'a mut Vec<(u64, usize)>,
 }
 
 // ── Element builders ─────────────────────────────────────────────────
@@ -83,6 +97,26 @@ pub(super) fn build_element(
     let parent_cascade = ctx.cascade.clone();
     ctx.cascade = element.descend(&parent_cascade);
 
+    // A `highlight` here replaces any ancestor's: the nearest declaration wins,
+    // and `GroupList::collect` skips nested declarations so an ancestor never
+    // resolves or counts matches that will not paint.
+    let parent_highlight = ctx.highlight.clone();
+    if let Some(value) = element.custom_props.get("highlight") {
+        let has_listener = element.events.contains("highlight");
+        let resolved = super::resolve_highlight(
+            ctx.highlights,
+            ctx.tree,
+            id,
+            value,
+            &crate::theme::Theme::dark(),
+            has_listener,
+        );
+        if let Some((_, Some(total))) = &resolved {
+            ctx.highlight_events.push((id, *total));
+        }
+        ctx.highlight = resolved.map(|(context, _)| context);
+    }
+
     // Resolve the style into a GPUI StyleRefinement. GPUI rebuilds its element
     // tree every frame, so this is the work that used to repeat every frame for
     // styles that had not changed. An animated element reads the same cache,
@@ -109,12 +143,15 @@ pub(super) fn build_element(
             // Custom renderers take a `StyleDesc` and resolve it themselves, so
             // a motion frame reaches them folded into one. They are the only
             // callers that still pay for that fold.
+            // `Arc<StyleDesc>` is shared, so the animated frame is applied to a
+            // copy. Mutating through the pointer would restyle every element
+            // that declared the same style.
             let animated = motion.as_ref().map(|frame| {
-                let mut declared = element.style.clone().unwrap_or_default();
+                let mut declared = element.style.as_deref().cloned().unwrap_or_default();
                 frame.style.apply_to(&mut declared);
                 declared
             });
-            let style = animated.as_deref().or(style);
+            let style = animated.as_ref().or(style);
             let custom_children: Vec<gpui::AnyElement> = element
                 .children
                 .iter()
@@ -133,6 +170,7 @@ pub(super) fn build_element(
                 selection: ctx.selection.clone(),
                 selectable: cascade.selectable(),
                 selection_wash: crate::color::to_hsla(cascade.selection_wash()),
+                highlight_set: ctx.highlight.clone(),
                 cascade: cascade.clone(),
             };
             ctx.custom_registry.render(
@@ -148,6 +186,7 @@ pub(super) fn build_element(
     let built = super::auto_height::wrap(id, built, motion.as_ref(), resolved.as_deref());
 
     ctx.cascade = parent_cascade;
+    ctx.highlight = parent_highlight;
     built
 }
 
@@ -199,7 +238,11 @@ fn build_virtual_list(
             })
         });
     let config = VirtualListConfig::from_element(element);
-    let window_start = window_start_from_element(element);
+    let window_start = if config.item_count.is_some() {
+        window_start_from_element(element)
+    } else {
+        0
+    };
     let list_state = match ctx.virtual_lists.entry(element.id) {
         std::collections::hash_map::Entry::Occupied(mut entry) => {
             entry.get_mut().sync(
@@ -257,16 +300,27 @@ fn build_virtual_list(
     }
 
     let list_id = element.id;
+    // Cloned, not copied: gpui runs this processor once per requested row, so
+    // the captured value must survive every call.
     let cascade = ctx.cascade.clone();
+    let highlight = ctx.highlight.clone();
     let render_item = cx.processor(move |view, index: usize, window, cx| {
-        let Some(child_id) = view
-            .virtual_lists
-            .get(&list_id)
-            .and_then(|entry| entry.child_at(index))
-        else {
-            return gpui::Empty.into_any_element();
+        let Some(entry) = view.virtual_lists.get(&list_id) else {
+            return unmounted_virtual_row(1.0);
         };
-        view.build_virtual_child(list_id, index, child_id, cascade.clone(), window, cx)
+        let Some(child_id) = entry.child_at(index) else {
+            // Empty measures as 0 and poisons ListState. Keep the estimate.
+            return unmounted_virtual_row(entry.config.estimated_item_height.unwrap_or(1.0));
+        };
+        view.build_virtual_child(
+            list_id,
+            index,
+            child_id,
+            cascade.clone(),
+            highlight.clone(),
+            window,
+            cx,
+        )
     });
     let mut list =
         gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
@@ -274,6 +328,11 @@ fn build_virtual_list(
         list = crate::style::resolve::apply_resolved(list, &resolved.base);
     }
     list.into_any_element()
+}
+
+pub(super) fn unmounted_virtual_row(height: f32) -> gpui::AnyElement {
+    use gpui::prelude::*;
+    gpui::div().h(gpui::px(height.max(1.0))).w_full().into_any()
 }
 
 fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> Option<u64> {
@@ -335,14 +394,18 @@ pub(crate) fn build_div(
 
     if let Some(style) = style {
         if crate::style::should_occlude(style) {
-            // BlockMouse (occlude) stops the hit test. The parent scroller
-            // then never sees the wheel. In-flow fills must use
-            // BlockMouseExceptScroll. Keep occlude for overlays that steal
-            // the pointer: absolute, fixed, or pointerEvents: "auto".
-            let steal_scroll =
-                matches!(style.position.as_deref(), Some("absolute") | Some("fixed"))
-                    || style.pointer_events.as_deref() == Some("auto");
-            el = if steal_scroll {
+            // BlockMouse (occlude) stops the hit test, so the parent scroller
+            // never sees the wheel. HTML does not work that way: a wheel over
+            // an absolutely positioned card still scrolls the ancestor. Only
+            // `pointerEvents: "auto"` opts into stealing it. Everything else
+            // uses BlockMouseExceptScroll.
+            //
+            // Absolute used to steal it too. That made a pannable canvas
+            // impossible: every absolutely placed item (a timeline clip, a
+            // graph node) ended the hit test before the pan listener ran.
+            // `<anchored>` still occludes through its own `occlude` prop, so
+            // menus and tooltips are unaffected.
+            el = if style.pointer_events.as_deref() == Some("auto") {
                 el.occlude()
             } else {
                 el.block_mouse_except_scroll()
@@ -371,6 +434,10 @@ pub(crate) fn build_div(
 
         if needs_scroll_x && needs_scroll_y {
             el = el.overflow_scroll();
+            // GPUI zeroes the smaller of the two deltas by default, so one
+            // diagonal wheel moves one axis. A browser moves both, and a
+            // two-axis container is exactly where a user expects that.
+            el.style().allow_concurrent_scroll = Some(true);
         } else if needs_scroll_x {
             overflow_x_only = true;
             el = el
@@ -433,9 +500,25 @@ pub(crate) fn build_div(
         let callback = ctx.event_callback.clone();
         match event_type.as_str() {
             // ── Click ────────────────────────────────────────────
+            // Primary button only, like the DOM. Right and middle clicks go to
+            // `onAuxClick`, and `onMouseDown` sees every button.
             "click" => {
                 el = el.on_click(move |click_event, _window, _cx| {
                     emit_event_full(&callback, id, "click", |p| {
+                        let (x, y) = point_to_xy(click_event.position());
+                        p.x = Some(x);
+                        p.y = Some(y);
+                        p.modifiers = Some(click_event.modifiers().into());
+                        p.click_count = Some(click_event.click_count() as u32);
+                        p.is_right_click = Some(click_event.is_right_click());
+                    });
+                });
+            }
+
+            // ── Aux click (non-primary), like the DOM `auxclick` ──
+            "auxClick" => {
+                el = el.on_aux_click(move |click_event, _window, _cx| {
+                    emit_event_full(&callback, id, "auxClick", |p| {
                         let (x, y) = point_to_xy(click_event.position());
                         p.x = Some(x);
                         p.y = Some(y);
@@ -613,9 +696,13 @@ pub(crate) fn build_div(
         }
     }
 
-    // Text content — selectable, same as a <text> leaf.
+    if element.events.contains("mouseDown") && element.events.contains("mouseMove") {
+        el = el.capture_pointer();
+    }
+
+    // Text content, selectable, same as a <text> leaf.
     if let Some(ref content) = element.content {
-        el = el.child(text_content(element.id, content, ctx));
+        el = el.child(text_content(element, content, ctx));
     }
 
     // Children
@@ -632,22 +719,35 @@ pub(crate) fn build_div(
     el.into_any_element()
 }
 
-/// A selectable text run owned by `element_id`. Runs are left to gpui so the
+/// A selectable text run owned by `element`. Runs are left to gpui so the
 /// text keeps inheriting colour, weight and family from ancestor styles.
-fn text_content(element_id: u64, content: &str, ctx: &BuildCtx) -> gpui::AnyElement {
-    if !ctx.cascade.selectable() {
-        // Still logged: `getPaintedText()` promises every painted string, and a
-        // `userSelect: "none"` label is exactly the chrome tests want to assert.
-        return crate::text::chrome_text(gpui::SharedString::from(content.to_string()), None);
-    }
+///
+/// The run's group is its parent host element, because React makes a separate
+/// host node for every interpolated string. `<text>Hello {name}!</text>` is one
+/// logical line painted as three runs that all share the parent's id.
+/// A `userSelect: "none"` run still paints highlight washes, because a browser
+/// still finds that text with Ctrl+F. Element chrome that must never be found,
+/// such as a code gutter, uses `chrome_text` instead.
+fn text_content(
+    element: &crate::retained_tree::RetainedElement,
+    content: &str,
+    ctx: &BuildCtx,
+) -> gpui::AnyElement {
     let text = crate::text::SelectableText::new(
+        element.id,
+        0,
         gpui::SharedString::from(content.to_string()),
         None,
-        selection_key(element_id, 0),
         ctx.selection.clone(),
         crate::color::to_hsla(ctx.cascade.selection_wash()),
     );
     selectable_text(crate::text::SelectableText {
+        group: crate::text::search::group_id(ctx.tree, element.id),
+        selectable: ctx.cascade.selectable(),
+        highlight: ctx
+            .highlight
+            .clone()
+            .map(crate::text::HighlightSource::Resolved),
         cursor: text.cursor.filter(|_| !ctx.cascade.cursor_declared()),
         ..text
     })
@@ -672,7 +772,7 @@ pub(crate) fn build_text(
         return gpui::div()
             .relative()
             .child(crate::automation::bounds_tracker(element.id, None))
-            .child(text_content(element.id, &content, ctx))
+            .child(text_content(element, &content, ctx))
             .into_any_element();
     }
 
@@ -695,7 +795,7 @@ pub(crate) fn build_text(
     ));
 
     if let Some(ref content) = element.content {
-        el = el.child(text_content(element.id, content, ctx));
+        el = el.child(text_content(element, content, ctx));
     }
 
     let child_ids: Vec<u64> = element.children.clone();

@@ -159,13 +159,14 @@ describe("painted text log", () => {
     render(
       <div style={{ display: "flex", flexDirection: "column", padding: 20, userSelect: "none" }}>
         <text style={{ fontSize: 20 }}>chrome label</text>
-        <code code={"x = 1"} language="python" />
+        <code code={"x = 1"} language="python" showLineNumbers />
       </div>
     )
 
     const painted = renderer.getPaintedText()
     expect(painted).toContain("chrome label")
-    expect(painted).toContain("python")
+    // The gutter is chrome: painted and logged, never selectable.
+    expect(painted).toContain("1")
     expect(painted).toContain("x = 1")
     // Painted, but still not selectable.
     expect(renderer.dragSelect(21, 30, 900, 30)).toBeNull()
@@ -178,11 +179,12 @@ describe("standard events on native elements", () => {
     const { render, renderer } = createTestRoot()
     render(
       <div style={{ display: "flex", padding: 20 }}>
-        <code code={"hello"} language="ts" showHeader={false} onClick={onClick} />
+        <code code={"hello"} language="ts" onClick={onClick} />
       </div>
     )
 
-    renderer.nativeSimulateClick(60, 34)
+    // The block is exactly its rows now, so the click must land on line 1.
+    renderer.nativeSimulateClick(30, 28)
     expect(onClick).toHaveBeenCalled()
   })
 

@@ -8,7 +8,11 @@ import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
 import { beforeEach, describe, expect, it } from "vitest"
 import { hasNativeTestRenderer, TestRenderer } from "../testing.js"
-import { render, resetRender } from "../reconciler/renderer.js"
+import {
+  installBrowserAutomation,
+  render,
+  resetRender,
+} from "../reconciler/renderer.js"
 
 const srcDir = fileURLToPath(new URL("..", import.meta.url))
 
@@ -141,6 +145,24 @@ describeNative("render()", () => {
 
     const node = renderer.findByType("text")[0]
     expect(node?.style).toMatchObject({ color: "#ff0000" })
+  })
+
+  it("always exposes browser automation on globalThis", async () => {
+    Reflect.set(globalThis, "window", {})
+    try {
+      installBrowserAutomation(renderer)
+      render(<text>automated</text>, { renderer })
+      renderer.flush()
+
+      const automation = Reflect.get(globalThis, "gpuix")
+      expect(automation).toBeDefined()
+      expect(await automation.getByText("automated").textContent()).toBe("automated")
+    } finally {
+      resetRender()
+      Reflect.deleteProperty(globalThis, "window")
+    }
+
+    expect(Reflect.get(globalThis, "gpuix")).toBeUndefined()
   })
 
   it("remounts under bun --hot without creating a new root", async () => {
