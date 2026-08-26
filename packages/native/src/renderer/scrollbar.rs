@@ -226,15 +226,25 @@ enum ThumbLook {
 }
 
 /// `scrollbar-color: <thumb> <track>`, or `auto`.
+///
+/// CSS takes `auto` or exactly two colours. One colour, three words or a
+/// word that is not a colour drops the whole declaration, the way a browser
+/// drops a value it cannot parse.
 fn scrollbar_colors(value: &str) -> (Option<Hsla>, Option<Hsla>) {
     let words = split_top_level(value);
+    if words.len() != 2 {
+        return (None, None);
+    }
     let color = |index: usize| {
         words
             .get(index)
             .and_then(|word| crate::color::parse_color_rgba(word))
             .map(Hsla::from)
     };
-    (color(0), color(1))
+    match (color(0), color(1)) {
+        (Some(thumb), Some(track)) => (Some(thumb), Some(track)),
+        _ => (None, None),
+    }
 }
 
 /// Splits on spaces outside parentheses, so `rgb(0 0 0 / 0.5) white` is
@@ -774,6 +784,15 @@ mod tests {
         assert!(thumb.is_some_and(|c| (c.a - 0.5).abs() < 0.01));
         assert!(track.is_some_and(|c| c.l > 0.99));
         assert_eq!(scrollbar_colors("auto"), (None, None));
+    }
+
+    #[test]
+    fn scrollbar_color_takes_auto_or_exactly_two_colors() {
+        // One colour is not valid CSS, so the declaration drops.
+        assert_eq!(scrollbar_colors("red"), (None, None));
+        assert_eq!(scrollbar_colors("red white blue"), (None, None));
+        // A word that is not a colour drops both, not just itself.
+        assert_eq!(scrollbar_colors("red nonsense"), (None, None));
     }
 
     fn spec(overflow: &str, extra: impl FnOnce(&mut StyleDesc), mode: Mode) -> Spec {
