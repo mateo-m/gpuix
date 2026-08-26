@@ -2,9 +2,10 @@
 
 use std::cell::Cell;
 use std::rc::Rc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use serde::Deserialize;
+use web_time::Instant;
 
 use crate::style::StyleDesc;
 

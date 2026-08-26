@@ -110,7 +110,19 @@ describe("native text showcase", () => {
             <markdown source={NOTES} />
           </Panel>
           <Panel title="CODE">
-            <code code={SNIPPET} language="typescript" showLineNumbers />
+            {/* `<code>` paints no card, so the card is here, in caller code. */}
+            <code
+              code={SNIPPET}
+              language="typescript"
+              showLineNumbers
+              style={{
+                padding: 12,
+                borderRadius: 10,
+                borderWidth: 1,
+                borderColor: "#ffffff1f",
+                backgroundColor: "#ffffff09",
+              }}
+            />
           </Panel>
         </div>
         <Panel title="DIFF" grow>
@@ -147,7 +159,7 @@ describe("native text showcase", () => {
         }}
       >
         <markdown source="heading text" />
-        <code code={"code line one"} language="ts" showHeader={false} />
+        <code code={"code line one"} language="ts" />
       </div>
     )
 
