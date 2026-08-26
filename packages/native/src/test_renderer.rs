@@ -23,7 +23,7 @@ use crate::events::EventPayload;
 use crate::renderer::{
     apply_batch_to_tree, debug_frame_overlay_mode_name, debug_frame_overlay_stats_js,
     parse_debug_frame_overlay_mode, DebugFrameOverlayStats,
-    to_element_id, EventCallback, GpuixView,
+    offset_to_js, to_element_id, EventCallback, GpuixView,
 };
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
@@ -578,6 +578,34 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Scroll every ancestor scroll box so the element shows, like the
+    /// web scrollIntoView. Call flush() after to apply and re-render.
+    #[napi]
+    pub fn scroll_into_view(
+        &self,
+        element_id: f64,
+        block: Option<String>,
+        inline: Option<String>,
+    ) -> Result<()> {
+        use crate::renderer::scroll_into_view::{scroll_into_view, Align};
+        let id = to_element_id(element_id)?;
+        let block = Align::parse(block.as_deref(), Align::Start);
+        let inline = Align::parse(inline.as_deref(), Align::Nearest);
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| {
+                    let tree = view.tree.lock().unwrap();
+                    scroll_into_view(&tree, id, block, inline, |id| {
+                        view.scroll_handles.get(&id).cloned()
+                    });
+                });
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
     /// Scroll a child into view by its index in the children list.
     /// Call flush() after to apply and re-render.
     #[napi]
@@ -674,10 +702,7 @@ impl TestGpuixRenderer {
                         }
                         view.scroll_handles.get(&id).map(|handle| {
                             let offset = handle.offset();
-                            vec![
-                                f64::from(f32::from(offset.x)),
-                                f64::from(f32::from(offset.y)),
-                            ]
+                            offset_to_js(offset).to_vec()
                         })
                     })
                 })

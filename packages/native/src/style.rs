@@ -487,6 +487,25 @@ style_desc! {
     overscroll_behavior: Option<String> = "overscrollBehavior",
     overscroll_behavior_x: Option<String> = "overscrollBehaviorX",
     overscroll_behavior_y: Option<String> = "overscrollBehaviorY",
+    /// `auto`, `thin` or `none`.
+    scrollbar_width: Option<String> = "scrollbarWidth",
+    /// `auto`, or a thumb colour and a track colour.
+    scrollbar_color: Option<String> = "scrollbarColor",
+    /// `auto`, `stable` or `stable both-edges`.
+    scrollbar_gutter: Option<String> = "scrollbarGutter",
+    /// Space `scrollIntoView` keeps around the element, a number of
+    /// pixels or `"Npx"`, alone or as the one-to-four shorthand.
+    scroll_margin: Option<Numeric> = "scrollMargin",
+    scroll_margin_top: Option<Numeric> = "scrollMarginTop",
+    scroll_margin_right: Option<Numeric> = "scrollMarginRight",
+    scroll_margin_bottom: Option<Numeric> = "scrollMarginBottom",
+    scroll_margin_left: Option<Numeric> = "scrollMarginLeft",
+    /// Space `scrollIntoView` keeps inside this scroll box.
+    scroll_padding: Option<Numeric> = "scrollPadding",
+    scroll_padding_top: Option<Numeric> = "scrollPaddingTop",
+    scroll_padding_right: Option<Numeric> = "scrollPaddingRight",
+    scroll_padding_bottom: Option<Numeric> = "scrollPaddingBottom",
+    scroll_padding_left: Option<Numeric> = "scrollPaddingLeft",
 
     // Cursor
     cursor: Option<String> = "cursor",

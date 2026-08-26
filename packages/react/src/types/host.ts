@@ -240,9 +240,43 @@ export interface StyleDesc {
   textOverflow?: "ellipsis" | "ellipsis-start"
   lineClamp?: Numeric
 
+  /** `visible`, `hidden`, `clip`, `scroll` or `auto`. `scroll` and `auto`
+   *  make a scroll box with a scrollbar. The OS picks the kind of bar: an
+   *  overlay bar that fades out after a scroll, or a classic bar in a
+   *  gutter. A classic bar shows at all times for `scroll` and only while
+   *  the content overflows for `auto`. */
   overflow?: string
   overflowX?: string
   overflowY?: string
+  /** `auto`, `thin` or `none`. `none` paints no bar and reserves no gutter. */
+  scrollbarWidth?: string
+  /** `auto`, or the thumb colour then the track colour, as in CSS. */
+  scrollbarColor?: string
+  /** `auto`, `stable` or `stable both-edges`. `stable` reserves the gutter
+   *  of a classic bar even while the content fits, and `both-edges` adds
+   *  the same gutter at the start of the axis. Overlay bars reserve
+   *  nothing, as in CSS. */
+  scrollbarGutter?: string
+  /** Space scrollIntoView keeps around this element, a number of pixels
+   *  or "Npx", alone or as the CSS one-to-four shorthand. */
+  scrollMargin?: number | string
+  scrollMarginTop?: number | string
+  scrollMarginRight?: number | string
+  scrollMarginBottom?: number | string
+  scrollMarginLeft?: number | string
+  /** Space scrollIntoView keeps inside this scroll box. */
+  scrollPadding?: number | string
+  scrollPaddingTop?: number | string
+  scrollPaddingRight?: number | string
+  scrollPaddingBottom?: number | string
+  scrollPaddingLeft?: number | string
+  /** `auto`, `contain` or `none`, one word for both axes or two with the x
+   *  axis first. A scroll box keeps a wheel event it can scroll with. At its
+   *  end, `auto` hands the event to the nearest scroll box around it and
+   *  `contain` or `none` keeps it. */
+  overscrollBehavior?: string
+  overscrollBehaviorX?: string
+  overscrollBehaviorY?: string
 
   /**
    * A CSS cursor keyword: `default`, `pointer`, `text`, `vertical-text`,
@@ -606,6 +640,11 @@ export interface NativeRenderer {
   scrollTo?(elementId: number, x: number, y: number): void
   /** Scroll a child into view by its index in the children list. */
   scrollToItem?(elementId: number, index: number): void
+  /** Scroll every ancestor scroll box so the element shows, like the web
+   *  scrollIntoView. block places it on the y axis and inline on the x
+   *  axis: "start", "center", "end" or "nearest". The defaults match the
+   *  web: "start" and "nearest". */
+  scrollIntoView?(elementId: number, block?: string, inline?: string): void
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset?(elementId: number): Array<number> | null
 
