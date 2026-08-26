@@ -9,7 +9,10 @@ import {
   PROTOCOL_VERSION,
   SseBackend,
 } from "../automation/index.js"
-import type { TestAutomationRenderer } from "../automation/client.js"
+import {
+  browserKeystrokeInit,
+  type TestAutomationRenderer,
+} from "../automation/client.js"
 
 function fakeRenderer(): TestAutomationRenderer {
   let clicks = 0
@@ -49,6 +52,16 @@ function fakeRenderer(): TestAutomationRenderer {
 }
 
 describe("automation stdio", () => {
+  it("preserves browser key characters and held state", () => {
+    expect(browserKeystrokeInit("A")).toMatchObject({ key: "A" })
+    expect(browserKeystrokeInit("-")).toMatchObject({ key: "-" })
+    expect(browserKeystrokeInit("cmd-a", true)).toMatchObject({
+      key: "a",
+      metaKey: true,
+      repeat: true,
+    })
+  })
+
   it("round-trips through data: lines with log noise", async () => {
     const backend = new InProcessBackend(fakeRenderer())
     let listener: ((chunk: string) => void) | undefined

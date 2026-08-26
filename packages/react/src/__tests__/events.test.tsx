@@ -16,7 +16,7 @@ import React, { useState, useRef } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { startFrameLoop } from "../reconciler/renderer.js"
 import type { EventPayload } from "@gpuix/native"
-import { expectScreenshotsDiffer } from "./test-utils"
+import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils"
 
 // All tests require the native GPUI test renderer (cargo build with test-support).
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
@@ -453,8 +453,8 @@ describeNative("events", () => {
 
       testRoot.render(<DialogScreenshotProbe />)
 
-      const path0 = "/tmp/gpuix-dialog-0.png"
-      const path1 = "/tmp/gpuix-dialog-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-dialog-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-dialog-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -940,6 +940,237 @@ describeNative("events", () => {
         ]
       `)
     })
+
+    it("keeps mouseMove and mouseUp after the pointer leaves the hitbox", () => {
+      const received: string[] = []
+
+      function Handle() {
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => received.push("down")}
+            onMouseMove={(e: EventPayload) =>
+              received.push(`move:${Math.round(e.x ?? 0)},${e.pressedButton}`)
+            }
+            onMouseUp={() => received.push("up")}
+          >
+            <text>handle</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Handle />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(200, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
+
+      expect(received).toEqual(["down", "move:200,0", "up"])
+    })
+
+    it("does not capture when the element only listens for mouseDown and mouseUp", () => {
+      const received: string[] = []
+
+      function PressOnly() {
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => received.push("down")}
+            onMouseUp={() => received.push("up")}
+          >
+            <text>press</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<PressOnly />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
+
+      expect(received).toEqual(["down"])
+    })
+
+    it("still delivers move and up to an overlay mounted on mouseDown", () => {
+      const received: string[] = []
+
+      function OverlayDrag() {
+        const [dragging, setDragging] = useState(false)
+        return (
+          <div
+            style={{
+              width: 400,
+              height: 200,
+              position: "relative",
+              backgroundColor: "#111111",
+            }}
+          >
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => {
+                received.push("clip-down")
+                setDragging(true)
+              }}
+            >
+              <text>clip</text>
+            </div>
+            {dragging && (
+              <div
+                style={{
+                  position: "absolute",
+                  top: 0,
+                  left: 0,
+                  width: 400,
+                  height: 200,
+                  backgroundColor: "#00000001",
+                }}
+                onMouseMove={() => received.push("overlay-move")}
+                onMouseUp={() => received.push("overlay-up")}
+              >
+                <text>overlay</text>
+              </div>
+            )}
+          </div>
+        )
+      }
+
+      testRoot.render(<OverlayDrag />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(200, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(200, 20, 0)
+
+      expect(received).toEqual(["clip-down", "overlay-move", "overlay-up"])
+    })
+
+    it("fires mouseUp once when released inside the captured element", () => {
+      const received: string[] = []
+
+      function Handle() {
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => received.push("down")}
+            onMouseMove={() => received.push("move")}
+            onMouseUp={() => received.push("up")}
+          >
+            <text>handle</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Handle />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(30, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(30, 20, 0)
+
+      expect(received).toEqual(["down", "move", "up"])
+    })
+
+    it("does not deliver captured moves to a sibling", () => {
+      const received: string[] = []
+
+      function Pair() {
+        return (
+          <div style={{ width: 400, height: 80, display: "flex" }}>
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => received.push("handle-down")}
+              onMouseMove={() => received.push("handle-move")}
+              onMouseUp={() => received.push("handle-up")}
+            >
+              <text>handle</text>
+            </div>
+            <div
+              style={{ width: 200, height: 40, backgroundColor: "#22aa66" }}
+              onMouseMove={() => received.push("sibling-move")}
+              onMouseUp={() => received.push("sibling-up")}
+            >
+              <text>sibling</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Pair />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(160, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(160, 20, 0)
+
+      expect(received).toEqual(["handle-down", "handle-move", "handle-up"])
+    })
+
+    it("releases capture when the captured node is removed", () => {
+      const received: string[] = []
+
+      function Drag() {
+        const [gone, setGone] = useState(false)
+        if (gone) {
+          return (
+            <div
+              style={{ width: 400, height: 80, backgroundColor: "#22aa66" }}
+              onMouseMove={() => received.push("replacement-move")}
+              onMouseUp={() => received.push("replacement-up")}
+            >
+              <text>replacement</text>
+            </div>
+          )
+        }
+        return (
+          <div
+            style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+            onMouseDown={() => {
+              received.push("down")
+              setGone(true)
+            }}
+            onMouseMove={() => received.push("handle-move")}
+            onMouseUp={() => received.push("handle-up")}
+          >
+            <text>handle</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<Drag />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(20, 20, 0)
+      testRoot.renderer.nativeSimulateMouseUp(20, 20, 0)
+
+      expect(received).toEqual(["down", "replacement-move", "replacement-up"])
+    })
+
+    it("does not hover a sibling while the pointer is captured", () => {
+      const received: string[] = []
+
+      function Pair() {
+        return (
+          <div style={{ width: 400, height: 80, display: "flex" }}>
+            <div
+              style={{ width: 80, height: 40, backgroundColor: "#3366ff" }}
+              onMouseDown={() => received.push("handle-down")}
+              onMouseMove={() => received.push("handle-move")}
+              onMouseUp={() => received.push("handle-up")}
+            >
+              <text>handle</text>
+            </div>
+            <div
+              style={{ width: 200, height: 40, backgroundColor: "#22aa66" }}
+              onMouseEnter={() => received.push("sibling-enter")}
+            >
+              <text>sibling</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Pair />)
+      testRoot.renderer.nativeSimulateMouseDown(20, 20)
+      testRoot.renderer.nativeSimulateMouseMove(160, 20, 0)
+      expect(received).toEqual(["handle-down", "handle-move"])
+      testRoot.renderer.nativeSimulateMouseUp(160, 20, 0)
+      expect(received.slice(0, 3)).toEqual([
+        "handle-down",
+        "handle-move",
+        "handle-up",
+      ])
+    })
   })
 
   describe("combined event interactions", () => {
@@ -1047,8 +1278,8 @@ describeNative("events", () => {
       testRoot.render(<ScreenshotProbe />)
 
       // Capture initial state
-      const path0 = "/tmp/gpuix-counter-0.png"
-      const path1 = "/tmp/gpuix-counter-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-counter-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-counter-1.png`
 
       // Clean up from previous runs
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
@@ -1107,8 +1338,8 @@ describeNative("events", () => {
         .findByType("div")
         .find((d) => d.events.has("keyDown"))!
 
-      const path0 = "/tmp/gpuix-keydown-0.png"
-      const path1 = "/tmp/gpuix-keydown-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-keydown-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-keydown-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -1162,8 +1393,8 @@ describeNative("events", () => {
 
       testRoot.render(<HoverScreenshotProbe />)
 
-      const path0 = "/tmp/gpuix-hover-0.png"
-      const path1 = "/tmp/gpuix-hover-1.png"
+      const path0 = `${SHOTS_DIR}/gpuix-hover-0.png`
+      const path1 = `${SHOTS_DIR}/gpuix-hover-1.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)
@@ -1409,6 +1640,132 @@ describeNative("events", () => {
       expect(offset![1]).toBeLessThan(0)
     })
 
+    it("lets an ancestor take the wheel over an absolutely placed child", () => {
+      // A pannable canvas places every item absolutely: a timeline clip, a
+      // graph node. If absolute stole the wheel, the pan listener never ran.
+      const deltas: number[] = []
+
+      function Canvas() {
+        return (
+          <div
+            style={{ width: 320, height: 200, position: "relative" }}
+            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: 40,
+                top: 40,
+                width: 120,
+                height: 40,
+                backgroundColor: "#3366ff",
+              }}
+            >
+              <text>clip</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<Canvas />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
+
+      expect(deltas).toEqual([-80])
+    })
+
+    it("lets an absolute sibling pass the wheel to a scroller below it", () => {
+      // BlockMouseExceptScroll is not DOM ancestor bubbling: it lets every
+      // scroll hitbox behind the element take the wheel, including one that
+      // is not an ancestor. An overlay that must not do this needs
+      // `pointerEvents: "auto"`.
+      function OverlayOverScroller() {
+        return (
+          <div style={{ width: 320, height: 200, position: "relative" }}>
+            <div style={{ width: 320, height: 200, overflowY: "scroll" }}>
+              <div style={{ height: 900, backgroundColor: "#1e1e2e" }}>
+                <text>tall</text>
+              </div>
+            </div>
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: 320,
+                height: 200,
+                backgroundColor: "#101010",
+              }}
+            >
+              <text>card</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<OverlayOverScroller />)
+      const scroller = testRoot.renderer
+        .findByType("div")
+        .find((d) => d.style.overflowY === "scroll")!
+      testRoot.renderer.nativeSimulateScrollWheel(160, 100, 0, -80)
+
+      const offset = testRoot.renderer.getScrollOffset(scroller.id)
+      expect(offset).not.toBeNull()
+      expect(offset![1]).toBeLessThan(0)
+    })
+
+    it("stops the wheel at a child with pointerEvents auto", () => {
+      const deltas: number[] = []
+
+      function ModalOverCanvas() {
+        return (
+          <div
+            style={{ width: 320, height: 200, position: "relative" }}
+            onScroll={(e: EventPayload) => deltas.push(e.deltaY ?? 0)}
+          >
+            <div
+              style={{
+                position: "absolute",
+                left: 0,
+                top: 0,
+                width: 320,
+                height: 200,
+                backgroundColor: "#101010",
+                pointerEvents: "auto",
+              }}
+            >
+              <text>modal</text>
+            </div>
+          </div>
+        )
+      }
+
+      testRoot.render(<ModalOverCanvas />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 60, 0, -80)
+
+      expect(deltas).toEqual([])
+    })
+
+    it("reports the modifiers held during a simulated wheel", () => {
+      const held: Array<boolean | undefined> = []
+
+      function ZoomSurface() {
+        return (
+          <div
+            style={{ width: 200, height: 200, backgroundColor: "#101010" }}
+            onScroll={(e: EventPayload) => held.push(e.modifiers?.cmd)}
+          >
+            <text>surface</text>
+          </div>
+        )
+      }
+
+      testRoot.render(<ZoomSurface />)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -40)
+      testRoot.renderer.nativeSimulateScrollWheel(100, 100, 0, -40, "cmd")
+
+      expect(held).toEqual([false, true])
+    })
+
     it("should support overflow-y scroll only", () => {
       function VerticalScroll() {
         return (
@@ -1549,8 +1906,8 @@ describeNative("events", () => {
 
       testRoot.render(<ScreenshotScroller />)
 
-      const path0 = "/tmp/gpuix-scroll-before.png"
-      const path1 = "/tmp/gpuix-scroll-after.png"
+      const path0 = `${SHOTS_DIR}/gpuix-scroll-before.png`
+      const path1 = `${SHOTS_DIR}/gpuix-scroll-after.png`
 
       if (fs.existsSync(path0)) fs.unlinkSync(path0)
       if (fs.existsSync(path1)) fs.unlinkSync(path1)

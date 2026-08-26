@@ -10,9 +10,11 @@
  *
  * The icon needs `rsvg-convert` (librsvg) and, on Windows, `magick`. When
  * either is missing the icon is skipped and the app takes the system default.
+ *
+ * CI sets COMPILE_OUT, COMPILE_TARGET, COMPILE_SKIP_ICONS, COMPILE_SKIP_APP.
  */
 import { spawnSync } from 'node:child_process'
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs'
 import path from 'node:path'
 import { parseArgs } from 'node:util'
 import { fileURLToPath } from 'node:url'
@@ -43,8 +45,18 @@ const DIST = path.join(ROOT, 'dist', SLUG)
 const PNG = path.join(DIST, 'app-icon.png')
 const ICO = path.join(DIST, 'app-icon.ico')
 const ICNS = path.join(DIST, 'app-icon.icns')
-const BINARY = path.join(DIST, process.platform === 'win32' ? `${SLUG}.exe` : SLUG)
+const COMPILE_TARGET = process.env.COMPILE_TARGET
+const WINDOWS = process.platform === 'win32' || (COMPILE_TARGET ?? '').includes('windows')
+const BINARY = path.join(DIST, outputName())
 const APP_BUNDLE = path.join(DIST, `${APP_NAME}.app`)
+
+function outputName(): string {
+  const requested = process.env.COMPILE_OUT
+  if (requested) {
+    return WINDOWS && !requested.endsWith('.exe') ? `${requested}.exe` : requested
+  }
+  return WINDOWS ? `${SLUG}.exe` : SLUG
+}
 
 function log(message: string): void {
   console.log(`[compile] ${message}`)
@@ -64,6 +76,7 @@ function run(command: string, args: string[]): void {
 
 /// Whether the icon can be built here. Returns the reason when it cannot.
 function iconBlocker(): string | null {
+  if (process.env.COMPILE_SKIP_ICONS === '1') return 'COMPILE_SKIP_ICONS is set'
   if (!values.icon) return 'no --icon given'
   if (!Bun.which('rsvg-convert')) return 'rsvg-convert is not installed'
   if (process.platform === 'win32' && !Bun.which('magick')) return 'magick is not installed'
@@ -119,6 +132,7 @@ async function compileBinary(withIcon: boolean): Promise<void> {
   log(`bundling ${path.relative(ROOT, ENTRY)} into a standalone binary`)
   const compile: {
     outfile: string
+    target?: string
     windows?: {
       icon?: string
       hideConsole: boolean
@@ -128,9 +142,13 @@ async function compileBinary(withIcon: boolean): Promise<void> {
       description: string
     }
   } = { outfile: BINARY }
-  if (process.platform === 'win32') {
+  if (COMPILE_TARGET) {
+    compile.target = COMPILE_TARGET
+    log(`target ${COMPILE_TARGET}`)
+  }
+  if (WINDOWS) {
     compile.windows = {
-      icon: withIcon ? ICO : undefined,
+      icon: withIcon && process.platform === 'win32' ? ICO : undefined,
       hideConsole: true,
       title: APP_NAME,
       publisher: 'GPUIX',
@@ -149,7 +167,9 @@ async function compileBinary(withIcon: boolean): Promise<void> {
 }
 
 function wrapMacApp(withIcon: boolean): void {
+  if (process.env.COMPILE_SKIP_APP === '1') return
   if (process.platform !== 'darwin') return
+  if (COMPILE_TARGET && !COMPILE_TARGET.includes('darwin')) return
   log(`wrapping ${path.relative(ROOT, BINARY)} in ${path.basename(APP_BUNDLE)}`)
   rmSync(APP_BUNDLE, { recursive: true, force: true })
   const macos = path.join(APP_BUNDLE, 'Contents', 'MacOS')
@@ -213,7 +233,7 @@ async function main(): Promise<void> {
   await compileBinary(withIcon)
   wrapMacApp(withIcon)
   log('done')
-  if (process.platform === 'darwin') {
+  if (process.platform === 'darwin' && existsSync(APP_BUNDLE)) {
     log(`run: open "${APP_BUNDLE}"`)
   } else {
     log(`run: ${BINARY}`)

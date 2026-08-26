@@ -457,15 +457,16 @@ to `AbsoluteLength::Rems` so a rem size change reflowed with no re-resolution. F
 costs that: the root cascade keys on the window rem size, so a `set_rem_size` call re-resolves
 every style that reads a rem. Nothing in GPUIX calls it today.
 
-### `lineHeight` is a multiple, not a length
+### A `lineHeight` string is a multiple, a number is pixels
 
-**Built, and breaking.** A bare `lineHeight` used to mean pixels. It now means a multiple of
-the font size, which is what CSS means, and reaches GPUI as `gpui::relative(n)`. A percentage
-is the same multiple. A length keeps its unit. Zero or less declares nothing.
+**Built.** A JS number keeps the old GPUIX meaning, so `lineHeight: 20` is 20 px, as in React
+Native. A string follows CSS: a bare number in a string is a multiple of the font size and
+reaches GPUI as `gpui::relative(n)`. A percentage is the same multiple. A length keeps its
+unit. Zero or less declares nothing.
 
-`packages/react/src/__tests__/css-lengths.test.tsx` pins all four against a wrapped paragraph,
-with a differ check first, so a line height that quietly did nothing would fail rather than
-pass.
+`packages/react/src/__tests__/css-lengths.test.tsx` pins all of these against a wrapped
+paragraph, with a differ check first, so a line height that quietly did nothing would fail
+rather than pass.
 
 ### Reading a style without buffering it
 

@@ -91,6 +91,46 @@ function Tabs({ active, onSelect }: { active: Tab; onSelect: (tab: Tab) => void 
   )
 }
 
+/**
+ * `<code>` paints glyphs only: no fill, border, radius, padding or header.
+ * The card is app code, built from a plain `<div>` and the `style` prop.
+ */
+function CodeBlock({ code, language }: { code: string; language: string }) {
+  return (
+    <div
+      style={{
+        display: 'flex',
+        flexDirection: 'column',
+        borderRadius: 10,
+        borderWidth: 1,
+        borderColor: '#ffffff1f',
+        backgroundColor: '#ffffff09',
+        overflow: 'hidden',
+      }}
+    >
+      <div
+        style={{
+          paddingTop: 5,
+          paddingBottom: 5,
+          paddingLeft: 12,
+          paddingRight: 12,
+          borderBottomWidth: 1,
+          borderColor: '#ffffff1f',
+          backgroundColor: '#ffffff05',
+        }}
+      >
+        <text style={{ fontSize: 11, color: '#b4b4b4' }}>{language}</text>
+      </div>
+      <code
+        code={code}
+        language={language}
+        showLineNumbers
+        style={{ minWidth: 0, paddingTop: 10, paddingBottom: 10, paddingLeft: 12, paddingRight: 12 }}
+      />
+    </div>
+  )
+}
+
 function App() {
   const [tab, setTab] = useState<Tab>('markdown')
   const [status, setStatus] = useState('drag across blocks, then press Cmd+C')
@@ -120,9 +160,7 @@ function App() {
         {tab === 'markdown' && (
           <markdown source={README} onLinkClick={(e) => setStatus(`link: ${e.value}`)} />
         )}
-        {tab === 'code' && (
-          <code code={SAMPLE} language="typescript" showLineNumbers />
-        )}
+        {tab === 'code' && <CodeBlock code={SAMPLE} language="typescript" />}
         {tab === 'diff' && (
           <diff
             scroll

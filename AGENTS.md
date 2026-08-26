@@ -2,11 +2,42 @@
 
 **Read [README.md](./README.md) first** to understand what GPUIX is, the architecture, mutation API, event flow, supported elements/events/styles, and the test renderer.
 
+Not **remorses**? Do not open a pull request. Open an issue. See [External contributors](#external-contributors).
+
+## GPUIX is a thin layer on GPUI
+
+**Read the GPUI docs and the GPUI source before you write native code.** `zed/crates/gpui`
+is checked out in this repository. `gpui::ListState`, `gpui::div`, `gpui::Window` and the
+rest are the real API; GPUIX only translates a React tree into calls on them.
+
+Do not invent behaviour on top of GPUI. If a GPUIX element needs something GPUI does not
+do, the order is:
+
+1. Find the GPUI API that already does it. Search `zed/crates/gpui` for the symbol
+2. Search `zed-industries/zed` issues and PRs. Someone may have shipped it already
+3. Fix it in the `remorses/zed` fork as a normal GPUI change, and bump the submodule
+4. Only then, add GPUIX code
+
+**Never paper over GPUI in `packages/native`.** A workaround that re-applies state after
+GPUI computed it, patches a value GPUI owns, or reaches around a GPUI invariant will break
+on the next submodule bump and is very hard to debug. When such a change is unavoidable,
+it must state in a comment what GPUI does, why that is not what GPUIX needs, and which
+GPUI call makes it safe.
+
+Prefer the smallest translation. Fewer moving parts is more important than matching any
+other framework's behaviour.
+
 ## Project Goal
 
 GPUIX enables building **native GPU-accelerated desktop applications** using **React and TypeScript**, powered by [GPUI](https://github.com/zed-industries/zed/tree/main/crates/gpui) (Zed's rendering framework).
 
 Instead of Electron/web rendering, your React components render directly to the GPU via Metal/Vulkan.
+
+## Mouse capture is armed by the press
+
+A `div` with `onMouseDown`, `onMouseMove`, and `onMouseUp` keeps move and up after the pointer leaves the hitbox. GPUIX arms that automatically when the same node listens for down and move, using GPUI's window-level mouse listeners.
+
+Put all three on the element the user grabs. Capture is armed by the **press**, so an overlay mounted during that press never arms it, and a release past the window edge is lost. `examples/timeline.tsx` drags clips, trims edges, scrubs, and marquee-selects with no overlay at all.
 
 ```
 React (TypeScript)  →  napi-rs  →  GPUI (Rust)  →  GPU
@@ -91,7 +122,7 @@ gpuix/
 │   │   │   ├── style.rs        # StyleDesc, color parsing
 │   │   │   ├── theme.rs        # Comet palette, oklch helpers, JS overrides
 │   │   │   ├── text/           # Selection: state, paint registry, TextRuns
-│   │   │   ├── syntax/         # Tree-sitter highlighting + bounded cache
+│   │   │   ├── syntax/         # Syntect highlighting + bounded cache
 │   │   │   ├── markdown/       # pulldown-cmark parser + gpui renderer
 │   │   │   ├── diff/           # Unified-patch parser + row flattening
 │   │   │   └── custom_elements/# input, img, svg, anchored, code, diff, markdown
@@ -139,6 +170,91 @@ is the only place document order is guaranteed: a `list()` decides at paint time
 which rows exist. `selection_frame_reset()` must stay the first child of the
 root, or stale entries from the previous frame leak into the next drag.
 
+## Text is grouped, because React splits one line into many nodes
+
+`shouldSetTextContent` is false, so `<text>Hello {name}!</text>` becomes **three**
+host text nodes and three `TextLayout`s. Anything that reasons about a line, copy
+and `highlight` both, must merge them first.
+
+The rule is structural: **adjacent** primitive text children of the same parent
+form one group. Never derive it from `display`; `apply_styles` only knows `flex`
+and `grid`, and every text node already sits inside a `div`.
+
+Copy and search must agree, so both call `search::group_id`. Using
+`element.parent` for one and adjacency for the other is a silent divergence: a
+non-text sibling between two leaves ends the run for search but not for copy.
+`None` means a run that never merges, which is every native element line.
+
+## `highlight` resolves per subtree, with two caches
+
+`crate::text::search` deliberately builds **no joined document** for a query. It
+matches per group, so a 5k-row chat is 5k small strings rather than one megabyte
+string rebuilt on every keystroke. A joined document exists only when a spec
+supplies explicit `ranges`, because only then does someone index into it.
+
+`HighlightCacheEntry` has two levels and they must stay separate:
+
+- the `GroupList` is keyed by **`search_revision`**
+- the `MatchSet` is additionally keyed by `HighlightSet::matcher_hash()`, which
+  **excludes** `activeIndex` and the colours; a cursor move swaps only the spec
+
+`search_revision` exists because `highlight` is itself a custom prop, so
+`subtree_revision` moves on every keystroke. Key the group list on that and a
+find-bar keystroke re-walks and re-folds the whole subtree.
+
+**A timing budget does not catch this.** On the 1000-turn chat the broken version
+is 2.7ms against 1.9ms, because most of that text lives in native element props
+rather than retained `<text>`. `highlight_cache_tests` in `renderer.rs` compares
+`Arc` identity instead, and fails outright.
+
+Native elements (`<code>`, `<markdown>`, `<diff>`) generate text inside
+`render()`, so the build-time resolver cannot see it. They match the exact string
+they are about to paint, through `washes_for_native_run`. Do **not** add a second
+traversal that re-derives their text and `sub` values; markdown assigns `sub`
+with a render-time counter and the two would drift.
+
+**Ordinals are allocated during paint, inside `search::wash`, for retained and
+native matches alike.** `activeIndex` means the nth match in the document, and
+only paint knows that order: retained matches are located before the frame,
+native text exists only during it, and a subtree can interleave them. Numbering
+each kind separately made `activeIndex: 0` mark the `<text>` match even when a
+`<code>` block came first.
+
+Two things that look redundant there are not. `MatchId::Retained` carries the
+build-time index so a match split over several interpolated runs takes exactly
+one ordinal. The `assigned` memo makes a row gpui paints twice keep its numbers
+rather than advance the cursor again.
+
+Paint only sees what is mounted, so a **virtualized subtree must say where it
+starts**. `matchIndexOffset` is the number of **matches** above the window, not
+a row index, and the sequence begins there. Without it `activeIndex` silently
+means "the nth visible match" and a find cursor lands on the wrong row.
+`<virtual-list>` already takes `windowStart` and `itemCount` from the app for the
+same reason. It is excluded from `matcher_hash`, like `activeIndex`, so scrolling
+never rescans text. A malformed value **rejects the whole spec**: a bad offset
+only shows up as a cursor on the wrong row, so silence is worse than nothing.
+
+`useTextSearch` takes both numbers as one `matches: { total, indexOffset }`
+object. They are never individually correct: native counts and numbers the same
+window, so an app that overrides one must override the other.
+
+`onHighlight` is queued during build and flushed **after** the root build
+returns, keyed on `MatchSet::identity()` rather than the count. Emitting inline
+lets a `setState` in the handler re-enter the build; keying on the count alone
+misses a query swap that finds the same number of hits, and including the
+colours makes a cursor move look like a new result. `reported` is written only
+when an event is really queued, or adding `onHighlight` after the first render
+would report nothing forever.
+
+A `<virtual-list>` row is built from `cx.processor` **after** the root render
+returned, so `build_virtual_child` re-resolves the declaration against the tree
+as it is then. On Windows and Linux the Node thread can commit new text in
+between, and a captured range would paint over the wrong glyphs.
+
+Content is searchable even under `userSelect: "none"`, because a browser still
+finds it. `chrome_text` cannot paint a wash, so it is only for real chrome:
+gutters, language tags, diff file headers.
+
 ## Layout numbers live in `Theme::metrics`, not in Rust constants
 
 Row heights, gutter widths, paddings, text sizes and the heading scale are all
@@ -176,6 +292,107 @@ the user asks, or when a debug-only tool (lldb, sanitizers) cannot run on
 release. After any debug build, rebuild release before starting `chat.tsx`
 or judging frame time.
 
+## Two Bun modes, only one of them refreshes React
+
+`bun --hot chat.tsx` is the **runtime**. It re-evaluates the module graph in the
+same process, so `render()` finds its window on `globalThis.__gpuixRenderHost`
+and remounts. There is no bundler, so there is no Fast Refresh transform and no
+`import.meta.hot`. Every save loses `useState`. Tracked upstream as
+[oven-sh/bun#40179](https://github.com/oven-sh/bun/issues/40179).
+
+`bun scripts/web.ts` is the **bundler dev server**. Bun applies the Fast Refresh
+transform and its HMR runtime calls `refreshRuntime.injectIntoGlobalHook(window)`,
+which is the only thing our reconciler needs: `injectIntoDevTools()` in
+`reconciler.ts` hands the hook `scheduleRefresh` and `setRefreshHandler`, and
+`react-refresh` drives updates through them.
+
+Delete that call and you get **no error and no page reload**. Bun still accepts
+the update and still calls `performReactRefresh()`, which iterates zero mounted
+roots and schedules nothing. The bundle changes and the painted UI stays stale.
+`fast-refresh.test.tsx` is the only thing that catches it.
+
+Do **not** assert on the return value of `injectIntoDevTools()`. It ends in
+`hook.checkDCE ? true : false`, and `react-refresh` installs no `checkDCE`, so a
+working injection still returns `false`. `fast-refresh.test.tsx` asserts the
+behaviour instead: `_getMountedRootCount()`, then a component swap that keeps
+state.
+
+**Never add `import.meta.hot.accept("./app", ...)` to a browser entry.** Bun runs
+an importer's dependency-accept callback even when the imported module already
+self-accepted for Fast Refresh. The callback then remounts on top of a
+successful refresh and wipes every hook. This looks exactly like Fast Refresh
+being broken, and it is not.
+
+**Never run `bun run clean` in `packages/react` while the web dev server is up.**
+That folder is inside the dev server's module graph, so removing it under a
+running server permanently corrupts the registry: every page load then fails
+with `Failed to load bundled module 'packages/react/dist/index.js'`, even after
+a hard reload, and only a server restart clears it. This is why `build` is plain
+`tsc` and the wipe lives in a separate `clean` script. Clean first, then start
+the server.
+
+## Custom elements are invisible to automation unless they say otherwise
+
+`automation::bounds_tracker` is what puts an element in the bounds registry, and
+`build_element` only attaches it for `<div>` and `<text>`. A custom element that
+paints itself has **no bounds**, so `getByTestId(..).click()` throws
+`Element has no painted bounds`. `<code>` and `<input>` / `<textarea>` attach
+their own. `<img>`, `<svg>`, `<anchored>`, `<diff>` and `<markdown>` do not.
+
+Add `el.child(crate::automation::bounds_tracker(ctx.id, None))` to any new custom
+element whose root is a `relative()` div. The tracker is `absolute().size_full()`,
+so it needs a positioned parent. Pass `Some(selectable)` instead of `None` when
+the element also owns a selection-start region; the editor uses `Some(false)` so
+a drag moves the caret instead of starting a document selection.
+
+## A macOS menu item owns its shortcut, so the window never sees it
+
+`crate::app_menu` installs the App and Window menus during `init_macos`. GPUI
+does not do this on its own: `NSApp.mainMenu` stays nil, macOS paints an empty
+menu bar, and `⌘Q`, `⌘H`, `⌘M` and `⌘W` do not exist, because AppKit only
+provides them through menu items.
+
+**Never add an Edit menu carrying `⌘C` / `⌘V` / `⌘X` / `⌘A`.** AppKit consumes a
+key equivalent before the window sees the key event, so those items would take
+the keystroke away from the selection listener in `text::paint` and from the
+per-focus clipboard handling in `custom_elements::input`. An Edit menu needs
+those handlers moved into GPUI actions first.
+
+`gpui::App::set_menus` reads each shortcut out of the keymap, so bind the keys
+**before** you call it. Window-level items (`MinimizeWindow`, `ZoomWindow`,
+`CloseWindow`) go through `with_window_menu_actions` on the root element in
+`GpuixView::render`, because a `Window` exists nowhere else; app-level ones
+(`Quit`, `Hide`, `HideOthers`, `ShowAll`) are `cx.on_action` globals.
+
+Two things real AppKit decides for you. The **title of the application menu is
+the executable name**, not the `Menu` name you pass, so `bun app.tsx` shows
+`bun`; only a `.app` bundle changes it. And the menu named `Window` is handed to
+`setWindowsMenu:`, which prepends AppKit's own tiling items, `Enter Full Screen`
+included. Do not add that item yourself.
+
+Verify with the accessibility tree, not a screenshot. The system menu bar is
+outside the window, so GPUIX automation cannot see it.
+
+```bash
+osascript -e 'tell application "System Events" to tell (first process whose unix id is PID) \
+  to get name of every menu bar item of menu bar 1'
+```
+
+## Browser keyboard input goes through GPUI's hidden element
+
+A GPUI web app has two event surfaces. The `<canvas>` takes pointer events.
+A hidden `[data-gpui-input]` element appended to `<body>` takes **every keyboard
+and IME event**: `gpui_web`'s `listen_input` attaches `keydown` / `keyup` there,
+not to the window or the canvas. Dispatching a synthetic `KeyboardEvent` at that
+element is therefore the only way automation can type into a browser app.
+
+**Match it by attribute only** (`IME_MIRROR_SELECTOR` in `automation/client.ts`).
+It used to be an `<input>`; [zed-industries/zed#63201](https://github.com/zed-industries/zed/pull/63201)
+replaced it with a `<textarea>` because a single-line input strips newlines from
+an assigned value and desynchronises the mirror from the document. Our
+tag-qualified selector was never updated, so after that submodule bump every
+browser keystroke failed. A tag-qualified selector will do it again.
+
 ## Virtualized React children re-enter through `cx.processor`
 
 `<virtual-list>` does not build its retained children during `GpuixView::render`.
@@ -206,6 +423,50 @@ vertical wheel onto overflow-x unless `restrict_scroll_to_axis()` is set.
 Every `overflow_x_scroll()` in native code must call that, or the parent
 scroller jumps sideways when the pointer is over `<code>` or a markdown table.
 
+A **two-axis** `overflow: "scroll"` sets `allow_concurrent_scroll`. GPUI's
+default zeroes the smaller of the two deltas, so one diagonal wheel moved one
+axis. A browser moves both, and a two-axis container is exactly where a user
+expects that.
+
+## A prepended row is only visible at the top
+
+`gpui::ListState` anchors on a **logical item**, and `splice_focusable` shifts
+that anchor by the number of rows inserted before it. So a prepend keeps the
+rows already on screen and pushes the new one above the viewport. That is
+correct for a history pane, and wrong for a feed.
+
+A browser anchors the same way and suppresses it at `scrollTop: 0`. GPUIX copies
+that: `VirtualListEntry::sync` remembers a top-aligned, non-`followTail` list
+whose `logical_scroll_top()` is `{0, 0}` and calls `scroll_to(default)` after the
+splice. Do not "simplify" that away.
+
+**Do not trust a short list to prove a prepend works.** While the content is
+shorter than the viewport, gpui's "does not fill" branch re-anchors to item 0 on
+every layout, so the drift is invisible. It appears on the frame where the list
+first overflows. `example-app` looked stuck on two rows for exactly that reason,
+and the regression test in `virtual-list.test.tsx` grows a 160px list from 2 rows
+to 12 rather than starting tall.
+
+## A frozen header cannot use native scroll
+
+GPUI moves a scroll container on the wheel frame. The `onScroll` callback that
+would move a sibling pane arrives a frame later, so a ruler synced that way
+tears away from its content during a fast pan.
+
+When two panes must stay locked to the pixel, **React owns the offset**: one
+`onScroll` listener on a non-scrolling parent, `scrollX` / `scrollY` in state,
+and one absolutely positioned wrapper per pane carrying the translation. Zed
+does the same; the editor owns its scroll position and paints the gutter and the
+text from it. `examples/timeline.tsx` is the worked example.
+
+Those wrappers must set `pointerEvents: "none"`. A positioned box takes hits
+even with no fill, so otherwise it swallows every press meant for the surface
+behind it. Its children keep their own hitboxes.
+
+Keep the moving subtree in a `memo` component whose props do not change during a
+pan. Then a wheel costs a handful of style mutations instead of one per row.
+`examples/timeline.perf.test.tsx` measures both halves.
+
 ## Scroll cost
 
 A wheel event calls `cx.notify` on the one `GpuixView`. That rebuilds the
@@ -218,9 +479,9 @@ wheel  ►  notify GpuixView  ►  render()  ►  Taffy on visible rows  ►  pa
 
 If scroll is smooth on empty padding and slow or stuck on text, a filled
 child is stealing the wheel. `occlude()` is **BlockMouse**. It stops the
-hit test. The parent list never sees the event. In-flow fills must use
-`block_mouse_except_scroll()`. Keep `occlude()` for absolute/fixed overlays
-and `pointerEvents: "auto"`.
+hit test. The parent list never sees the event. Every painted or positioned
+`div` must use `block_mouse_except_scroll()`. `occlude()` is reserved for
+`pointerEvents: "auto"` and for `<anchored>`, which sets it itself.
 
 The chat "jank" over code and tables was the Y-to-X remap above, not the
 tick loop. After that fix, remaining cost is Taffy on fat visible rows.
@@ -232,9 +493,14 @@ every row live. Profile with `debugFrameOverlay: 'full'`. The overlay is
 draw time, not FPS. `8.3 MS` is about 120 Hz.
 
 A long `{rows.map(...)}` is slow **at start**. `createInstance` runs in the
-render phase. Use `VirtualList` with `itemCount` and `renderItem` so React
-only mounts the visible window. The host `<virtual-list>` children API still
-retains every child. After mount, scroll cost is visible Taffy only.
+render phase. The host `<virtual-list>` children API retains every child. Pass
+`itemCount` and `windowStart` and render only that slice so React mounts a
+window too. After mount, scroll cost is visible Taffy only.
+
+**There is no `VirtualList` wrapper component and there must not be one.** The
+window is app state. A generic wrapper cannot know when to widen its own
+window, so it silently dropped rows whenever `itemCount` grew without a scroll,
+which is exactly what a filter does.
 
 Keep chrome state out of the component that maps the list. `memo(Transcript)`
 so a sidebar click or composer keystroke does not remap every row. A 5k-row
@@ -346,6 +612,39 @@ For Rust time, `sample` the bun/node pid, or `samply`. GPUI also has
 A `.node` cannot unload. After a native rebuild, restart the app. `bun --hot`
 only remounts React.
 
+### Mutation wire format and tree memory
+
+Do not swap the `applyBatch` codec before reading
+[docs/serialization-benchmark.md](./docs/serialization-benchmark.md). It
+measures both halves on the real `ChatApp` queue, and the answer is that the
+codec is the **smallest** lever.
+
+```bash
+cd examples && TURNS=10000 SAFE_MDX=1 bun run bench:serde
+cd packages/native && cargo run --release --example bench_serde
+```
+
+Four results that shaped the current code:
+
+- `StyleDesc` is **1392 bytes**. Putting it in an enum variant makes the whole
+  `Vec<BatchOp>` 1408 bytes wide, so a 221k-op mount reserved 312 MB before
+  parsing anything. Never inline a style in an op
+- **styles are hash-consed in Rust, not in the protocol.** `RetainedTree::intern_style`
+  hashes the raw payload and shares one `Arc<StyleDesc>`. Do not move this into
+  JS: `commitUpdate` resends the full style every commit, a dragged element
+  produces a distinct style every frame, and a JS-owned table would grow forever
+  while sending two ops where it sends one today
+- `sweep_styles` runs after every batch and drops entries with
+  `Arc::strong_count == 1`. That is the only thing keeping the table bounded
+- `RetainedElement.style` is `Option<Arc<StyleDesc>>`. Read it with
+  `.as_deref()`. The motion path must copy out before mutating, or one
+  element's animation restyles every element that declared the same style
+
+No mainstream JS↔Rust codec deduplicates repeated string **values**. msgpackr
+`useRecords` deduplicates keys, and its output is not plain MessagePack, so
+`rmp_serde` cannot read it. MessagePack measured 1.24x, which does not pay for a
+new dependency on both sides.
+
 ## Overlays and icons
 
 Menus, tooltips, and dialogs go through **`SelectContent` / `ComboboxContent` /
@@ -357,10 +656,30 @@ Do not paint `#00000000` over a blurred window. A transparent GPUI quad punches
 through Metal to the desktop. Omit the fill, or use the parent color. Overlay
 rows need a **solid** fill too, not a transparent idle state.
 
-A filled in-flow `div` uses **BlockMouseExceptScroll**. Clicks and hovers stop.
-The parent scroller still gets the wheel. `position: "absolute"` / `"fixed"`
-or `pointerEvents: "auto"` uses **BlockMouse** and steals the wheel too.
-`pointerEvents: "none"` opts out.
+Any `div` that paints a fill, or that is positioned, uses
+**BlockMouseExceptScroll**. Clicks and hovers stop, the wheel still reaches the
+scroll hitboxes behind it. Only `pointerEvents: "auto"` uses **BlockMouse** and
+steals the wheel.
+
+That is not DOM bubbling. GPUI hitboxes are one flat painted list, so the wheel
+reaches **any** scroller behind the element, not only an ancestor. An absolute
+card over an unrelated scroller scrolls it. Give a real overlay
+`pointerEvents: "auto"`.
+
+`pointerEvents: "none"` means this element inserts **no hitbox**, so nothing
+behind it is blocked. It does not disable the listeners on the element itself,
+and it does not inherit.
+
+Absolute used to steal the wheel too. That made a pannable canvas impossible:
+every absolutely placed item ended the hit test before the ancestor's pan
+listener ran, and HTML does not behave that way either. `<anchored>` has its own
+`occlude` prop, so menus never depended on the old rule.
+
+An absolutely positioned wrapper with **no** fill still takes hits, like an
+empty positioned `div` in a browser. A translating wrapper that only carries a
+scroll offset must set `pointerEvents: "none"`, or it swallows every press meant
+for the surface behind it. Its children keep their own hitboxes:
+`pointerEvents` does not inherit.
 
 Text **selection** still uses window mouse events and text bounds, not hitboxes.
 A drag on a menu over markdown can still start a selection. Do not skip
@@ -394,39 +713,6 @@ The following files in `packages/native/` are auto-generated by napi-rs during `
 
 To update the TypeScript API surface, edit the Rust source files in `packages/native/src/` (add/modify `#[napi]` structs, methods, functions), then run `bun run build` in `packages/native` to regenerate.
 
-## Commit messages
-
-One line. Conventional Commits. Plain language.
-
-```
-<type>(<scope>): <what changed>
-```
-
-`type` is one of `feat`, `fix`, `refactor`, `perf`, `docs`, `test`, `build`,
-`ci`, `chore`. `scope` is the part of the repo the change touches, such as
-`motion`, `css`, `native`, `react`. Leave the scope out when the change is not
-about one part.
-
-Rules:
-
-- No body and no trailers. The subject line is the whole message. Put the
-  reasoning in the changeset or the code, where a reader will look for it.
-- Never add `Co-Authored-By`, and never add any other co-authorship or
-  attribution trailer, for an agent or for a person. The commit is signed, and
-  the signature is the record of who wrote it.
-- Every commit is signed. `git config commit.gpgsign` has to read `true`, and
-  `git log --format='%G?'` has to read `G` for every commit you write. A commit
-  that lands unsigned gets amended and re-signed before anything else happens.
-- Lowercase the description, and write it as an instruction: `add`, not `adds`
-  or `added`.
-- Say what changed in words a person would use out loud. No filler, no
-  marketing, no words that could sit on any other commit in any other repo.
-  `fix(motion): measure auto height at the resolved width` is good.
-  `fix(motion): improve robustness of height calculation logic` is not.
-- Under about 72 characters.
-
-These rules apply to every commit in this repo, from any person and any agent.
-
 ## Changesets
 
 **Always** add a `.changeset/*.md` file after a user-facing fix or feature. Do this before you consider the work done. Never skip it. Never edit CHANGELOG.md. Never bump `package.json` version by hand.
@@ -438,6 +724,8 @@ Load the `changesets` skill for format and rules. If the change fixes a GitHub i
 **Never publish from a local machine.** CI is the only release path.
 
 `.github/workflows/ci.yml` builds `@gpuix/native` for every napi target (macOS arm64/x64, Linux x64/arm64, Windows x64/arm64), uploads the `.node` artifacts, then the `publish` job downloads them, runs `napi create-npm-dirs` + `napi artifacts`, and publishes `@gpuix/native` and `@gpuix/react`.
+
+Each build job also compiles `examples/chat.tsx` with `bun build --compile` against that target's `.node`, and uploads `example-chat-<target>`. On `main`, the publish job attaches those binaries to the `@gpuix/react@x.y.z` GitHub release.
 
 Publish order is required. `@gpuix/react` depends on `@gpuix/native` (`workspace:^`). If React publishes first, an install in that window cannot resolve native.
 
@@ -559,13 +847,18 @@ pub struct EventPayload {
 
 ### Standalone Build
 
-The `zed/` submodule tracks the `gpui-macos-embedded` branch of `remorses/zed`. Cargo uses path
+The `zed/` submodule tracks the `gpuix` branch of `remorses/zed`. Cargo uses path
 dependencies from that submodule so the native addon and native platforms always
 compile from the same source:
 
+**Always keep `zed/` checked out on the local `gpuix` branch. Never
+leave the submodule in detached HEAD state**, including after `git submodule update`
+or a pointer update. If Git detaches it, immediately switch back to
+`gpuix` before doing any other work.
+
 - macOS uses `MacPlatform::new_embedded()` and pumps AppKit on Node's main thread
 - Windows and Linux run `gpui_platform::application().run()` on a dedicated UI thread
-- `gpui_macos` is a direct macOS dependency for production and the GPU-backed test renderer
+- `gpui_platform` selects Metal or DirectX for the GPU-backed test renderer
 - `core-text = 21.0.0`, `core-graphics = 0.24.0` for macOS
 
 These avoid the core-graphics 0.24 vs 0.25 conflict between `core-text` and Zed's `font-kit` fork.
@@ -587,20 +880,103 @@ xcodebuild -downloadComponent MetalToolchain
 
 ### Bumping the gpui revision
 
-1. Merge upstream Zed into the `gpui-macos-embedded` branch in `remorses/zed`.
+1. Merge upstream Zed into the `gpuix` branch in `remorses/zed`.
 2. Resolve any embedded `gpui_macos` conflicts in a new commit; do not rewrite history.
-3. Fast-forward the `zed/` submodule to the updated `gpui-macos-embedded` branch.
+3. Fast-forward the `zed/` submodule to the updated `gpuix` branch.
 4. Match `rust-toolchain.toml` to `zed/rust-toolchain.toml`.
 5. Run `cargo check --all-targets`, `bun run build`, and the test suites.
+
+### Search Zed before you touch GPUI
+
+Before you debug a GPUI behaviour, add a GPUIX feature that needs a new GPUI API,
+or patch the fork, **search `zed-industries/zed` first**. Zed is a large project
+with an active roadmap. The answer is often one of:
+
+- someone already reported the same bug
+- an open PR already implements the API, so **wait and bump the submodule**
+- a merged PR already added it, so **bump the submodule** instead of writing code
+- a closed issue says the Zed team declined it, so plan a fork-only fix
+
+Search issues and PRs together, then search code:
+
+```bash
+# issues + PRs, full text
+gh search issues --repo zed-industries/zed --include-prs --limit 30 'TransformationMatrix' \
+  --json number,title,url,state,isPullRequest \
+  --jq '.[] | [.number, .isPullRequest, .state, .title, .url] | @tsv'
+
+# title only, to find the feature rather than every mention
+gh search issues --repo zed-industries/zed --include-prs --match title --limit 30 'transform'
+
+# where the API already exists in the tree
+gh search code --repo zed-industries/zed --language Rust --limit 30 'TransformationMatrix'
+```
+
+Then read the promising ones in full. A closed issue is the important signal, and
+its `stateReason` and comments explain whether the idea was rejected or shipped:
+
+```bash
+gh issue view 53303 -R zed-industries/zed --json number,title,state,stateReason,body,comments
+gh pr view 59413 -R zed-industries/zed --json title,state,body,files,comments,reviews
+```
+
+**Use the `--repo` and `--match` flags. Do not put `repo:` or `in:title` inside the
+query string.** `gh search` mangles the inline form: `repo:` first fails with
+`Invalid search query`, and `in:title ... repo:owner/name` silently drops the repo
+filter and returns results from unrelated repositories.
+
+Search the real symbol names, not concepts. `TransformationMatrix`,
+`with_element_offset`, and `request_animation_frame` find the discussion.
+"animation is slow" does not.
+
+Record the outcome in the changeset or PR body, with issue and PR URLs, so the
+next session does not repeat the search.
+
+### Fixing GPUI for GPUIX
+
+The `remorses/zed` fork is part of GPUIX's implementation boundary. Fix GPUI in
+the fork when a reusable GPUI API or platform correction keeps GPUIX simpler
+and avoids browser, embedded-platform, or event-routing workarounds. Do not keep
+a hack in `packages/native` only because the required API is missing upstream.
+
+Fork-only fixes must be normal commits on the `gpuix` branch and
+must be pushed to `remorses/zed` before the GPUIX submodule points at them. Never
+pin GPUIX to a detached commit that is not reachable from that remote branch.
+Use a separate Zed worktree for the change; do not develop or commit inside the
+`zed/` build checkout.
+
+```bash
+# from gpuixlocal/zed
+git fetch origin gpuix
+git worktree add /Users/morse/Documents/GitHub/zed-gpuix-<change> \
+  -b gpuix-<change> origin/gpuix
+
+# from the Zed worktree, after review
+git push origin HEAD:gpuix
+
+# then update this repository to that reachable commit
+git fetch origin gpuix
+git switch gpuix
+git merge --ff-only origin/gpuix
+```
+
+Commit the resulting `zed` submodule pointer in GPUIX with the code that uses
+the new API. The `.gitmodules` branch remains `gpuix`.
 
 ### PRs to Zed
 
 A "PR to Zed" means **upstream** [`zed-industries/zed`](https://github.com/zed-industries/zed)
-`main`. Never open that PR from this checkout. Never point it at `remorses/zed`.
+`main`. This is different from a GPUIX fork fix above. Never open an upstream
+PR from this checkout. Never point that PR at `remorses/zed`.
 
-Do **not** branch, commit review markers, or reset `zed/` inside this checkout.
-That submodule is what GPUIX builds against. A dirty or switched `zed/` breaks
-the native addon and the test renderer.
+`gpui-macos-embedded` is the head branch for the focused upstream macOS embedding
+PR. Keep it limited to that PR. Never put general GPUIX fork changes there and
+never point this repository's submodule at it.
+
+Do **not** switch `zed/` to another branch, detach HEAD, commit review markers,
+or reset it inside this checkout. That submodule is what GPUIX builds against.
+A dirty or incorrectly switched `zed/` breaks the native addon and the test
+renderer.
 
 ```bash
 # from gpuixlocal/zed. leaves this submodule on its current commit
@@ -611,7 +987,7 @@ git worktree add /Users/morse/Documents/GitHub/zed-<branch-name> -b <branch-name
 
 Commit only in that worktree. Do not add comments to Zed source. Push the branch
 to `remorses/zed`, then open the PR with `--repo zed-industries/zed --base main`.
-After merge, cherry-pick onto `gpui-macos-embedded` and fast-forward the submodule
+After merge, cherry-pick onto `gpuix` and fast-forward the submodule
 here. Never run `git reset` in `zed/` to "undo" PR work.
 
 ### PRs to GPUIX
@@ -666,11 +1042,13 @@ belong in README. This list is only the remaining engineering work.
 - [x] Native `<input>` and `<textarea>`
 - [x] `<img>` (local raster/SVG) and `<svg>` (tintable monochrome icons)
 - [x] `<virtual-list>`
-- [x] `<code>`, `<diff>`, `<markdown>` with Tree-sitter
+- [x] `<code>`, `<diff>`, `<markdown>` with Syntect
 - [x] Cross-element text selection
+- [x] `highlight` prop: search matches and explicit ranges
 - [x] Headless Select, Combobox, Tooltip
 - [x] `setWindowTitle`
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
+- [x] macOS menu bar (`crate::app_menu`, `appName`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`setDebugFrameOverlay`)
 
@@ -678,7 +1056,7 @@ belong in README. This list is only the remaining engineering work.
 
 #### High Priority
 
-- [ ] **Background highlighting** - move Tree-sitter off the frame thread once
+- [ ] **Background highlighting** - move Syntect off the frame thread once
       there is a way to request a repaint from a background task
 
 #### Medium Priority
@@ -690,7 +1068,8 @@ belong in README. This list is only the remaining engineering work.
 - [ ] **Window controls** - resize, minimize (title already works)
 - [ ] **Multiple windows** - Support multiple GPUI windows
 - [x] **JS remount** - `render()` plus `bun --hot` remounts the React tree on the same window
-- [ ] **React Refresh** - keep `useState` across saves. Needs Bun to run the Fast Refresh transform during `bun --hot`
+- [x] **React Refresh in the browser** - `bun run web` keeps `useState` across saves
+- [ ] **React Refresh on desktop** - `bun --hot` is the runtime, not the bundler, so it runs no Fast Refresh transform. Tracked as [oven-sh/bun#40179](https://github.com/oven-sh/bun/issues/40179)
 - [ ] **Native hot reload** - cannot unload a `.node`. `bun run dev` rebuilds and restarts
 - [ ] **DevTools** - React DevTools integration
 - [ ] **Animations** - Interpolated style transitions
@@ -709,17 +1088,25 @@ cd packages/react && bun run test
 # Example app tests
 cd examples && bun run test
 
-# Chat draw / chrome regression (same suite, file filter)
-cd examples && bun run test chat.perf.test.tsx
+# Starter todo app, driven through the automation client
+cd example-app && bun run test
+
+# Chat and timeline draw / chrome regressions (excluded from the default run)
+cd examples && bun run test:perf
 
 # macOS CPU clamp. E-cores, not Chrome 6x. Do not set in CI.
-THROTTLE=utility bun run test chat.perf.test.tsx
+THROTTLE=utility bun run test:perf
 THROTTLE=utility bun profile-chat-scroll.tsx
 THROTTLE=utility bun --hot chat.tsx
 ```
 
-`examples/chat.perf.test.tsx` is the automated profile. It uses `createTestRoot()`,
-not the live window. Assert **p95 draw / flush ms**, not a per-frame FPS floor.
+`examples/chat.perf.test.tsx` and `examples/timeline.perf.test.tsx` are the
+automated profiles. They use `createTestRoot()`, not the live window. Assert
+**p95 draw / flush ms**, not a per-frame FPS floor.
+
+Timeline drag samples are not comparable to timeline pan samples.
+`nativeSimulateMouseMove` flushes before and after the event, so every drag
+sample contains two complete GPUI paints. `dispatchScrollWheel` does not flush.
 
 `THROTTLE` re-execs under `taskpolicy -c`. `utility` is an M1/M2 Air CPU proxy.
 `background` is harsher, closer to a 2019 Intel Mac. GPU and RAM stay on this
@@ -789,11 +1176,40 @@ you record a sidebar open/close, not a screen recorder.
 - [create-gpui-app](https://github.com/zed-industries/create-gpui-app) - Official GPUI starter template
 - [react-reconciler](https://github.com/facebook/react/tree/main/packages/react-reconciler) - React's custom renderer API
 
-## Contributing
+## External contributors
+
+This section is for anyone who is not [remorses](https://github.com/remorses) (Tommy).
+
+**Do not open a pull request.** Open a GitHub issue. Describe the bug or the idea. Wait.
+
+Open a PR only after remorses says it is OK on that issue. Unsolicited PRs will be closed.
+
+If remorses says OK, follow the rest of this file and these rules.
+
+**How to work**
 
 1. For Rust changes, work in `zed/crates/gpuix` (easier to build)
-2. Copy changes to `gpuix/packages/native/src/` when ready
+2. Copy changes to `packages/native/src/` when ready
 3. TypeScript changes can be made directly in `packages/react/`
+
+**Do not**
+
+- Edit auto-generated files: `packages/native/index.d.ts`, `packages/native/index.js`, `packages/native/*.node`. Change the Rust `#[napi]` source and run `bun run build` in `packages/native`
+- Edit `CHANGELOG.md` or bump `package.json` version by hand
+- Publish from a local machine. CI is the only release path
+- Branch, commit, or reset the `zed/` submodule in this checkout. Do not open a Zed PR from here
+- Ship or start the app on a debug native build. Use `bun run build` in `packages/native` (release)
+- Use `bun test`. The suites are Vitest. Use `bun run test`
+
+**Must**
+
+- Add a `.changeset/*.md` file for every user-facing fix or feature. Put `Fixes #N` on its own line when the work closes an issue
+- Run the package test scripts: `packages/react` then build `@gpuix/react`, then `examples`
+- Keep one scroll parent. Nested scrolling is not supported
+- Send every painted string through `crate::text`. Never `div().child(some_string)`
+- Put layout numbers on `Theme::metrics`, not new Rust constants
+
+If an agent writes the change, the PR body must include **harness**, **agent**, **model**, and every user prompt. See **PRs to GPUIX**.
 
 
 ## Examples using same tech as ours. To unblock on issues and compare to our code

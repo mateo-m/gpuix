@@ -9,17 +9,23 @@
 /// flush the tree, dispatch through GPUI, drain events, and feed them into
 /// the React event registry via handleGpuixEvent.
 
-import { spawnSync } from "node:child_process"
 import type { ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
 import type {
   DebugFrameOverlayMode,
   DebugFrameOverlayStats,
+  HighlightMatch,
   NativeRenderer,
   RootOptions,
 } from "./types/host.js"
 import { createRoot, flushSync, type Root } from "./reconciler/reconciler.js"
 import { handleGpuixEvent } from "./reconciler/event-registry.js"
+export {
+  applyMacCpuThrottleFromEnv,
+  MAC_CPU_THROTTLES,
+  readMacCpuThrottle,
+} from "./cpu-throttle.js"
+export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
@@ -29,11 +35,22 @@ interface NativeTestRendererApi extends NativeRenderer {
   focusElement(elementId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
-  simulateClick(x: number, y: number): void
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number): void
-  simulateMouseMove(x: number, y: number, pressedButton?: number): void
-  simulateMouseDown(x: number, y: number, button: number): void
-  simulateMouseUp(x: number, y: number, button: number): void
+  simulateClick(x: number, y: number, button?: number, modifiers?: string): void
+  simulateScrollWheel(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string
+  ): void
+  simulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void
+  simulateMouseDown(x: number, y: number, button: number, modifiers?: string): void
+  simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
   getTreeJson(): string
   getAutomationTree(): string
   getElementBounds(elementId: number): number[] | null
@@ -42,9 +59,11 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockFastForward(deltaMs: number): number
   clockResume(): number
   getRootId(): number | null
+  getWindowSize(): { width: number; height: number }
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number): void
   scrollToItem(elementId: number, index: number): void
+  scrollIntoView(elementId: number, block?: string, inline?: string): void
   getScrollOffset(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
@@ -57,6 +76,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getSelectedText(): string | null
   readClipboardText(): string | null
   getPaintedText(): string[]
+  getPaintedHighlights(): HighlightMatch[]
   getSyntaxCacheStats(): number[]
   clearSelection(): void
   captureScreenshot(path: string): void
@@ -64,10 +84,16 @@ interface NativeTestRendererApi extends NativeRenderer {
 }
 
 interface NativeTestRendererConstructor {
-  new (): NativeTestRendererApi
+  new (width?: number, height?: number): NativeTestRendererApi
 }
 
-// The native test renderer is currently exported only by macOS builds.
+/** Offscreen window size for a test root. Defaults to 1280x800 in native. */
+export interface TestWindowOptions {
+  width?: number
+  height?: number
+}
+
+// The native test renderer is exported by macOS and Windows builds.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 try {
   // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -84,49 +110,6 @@ try {
 /** Whether the native TestGpuixRenderer is available (for conditional test registration). */
 export const hasNativeTestRenderer = NativeTestRenderer != null
 
-export const MAC_CPU_THROTTLES = ["utility", "background", "maintenance"] as const
-
-export type MacCpuThrottle = (typeof MAC_CPU_THROTTLES)[number]
-
-function isMacCpuThrottle(value: string): value is MacCpuThrottle {
-  for (const clamp of MAC_CPU_THROTTLES) {
-    if (clamp === value) return true
-  }
-  return false
-}
-
-export function readMacCpuThrottle(): MacCpuThrottle | null {
-  const raw = (process.env.THROTTLE ?? "").trim().toLowerCase()
-  if (!raw) return null
-  if (!isMacCpuThrottle(raw)) {
-    throw new Error(
-      `THROTTLE=${raw} is invalid. Use utility, background, or maintenance.`,
-    )
-  }
-  return raw
-}
-
-/** Re-exec under `taskpolicy -c`. Call from the process entry, not a vitest worker. */
-export function applyMacCpuThrottleFromEnv(): MacCpuThrottle | null {
-  const mode = readMacCpuThrottle()
-  if (!mode) return null
-  if (process.env.GPUIX_CPU_THROTTLE_APPLIED === mode) return mode
-  if (process.platform !== "darwin") {
-    throw new Error(`THROTTLE=${mode} needs macOS taskpolicy`)
-  }
-  if (process.argv.some((arg) => arg.includes("vitest/dist/workers"))) {
-    throw new Error(
-      `THROTTLE=${mode} must wrap the vitest process. Use examples/vitest.config.ts.`,
-    )
-  }
-  console.log(`[throttle] taskpolicy -c ${mode}`)
-  const result = spawnSync("taskpolicy", ["-c", mode, ...process.argv], {
-    stdio: "inherit",
-    env: { ...process.env, GPUIX_CPU_THROTTLE_APPLIED: mode },
-  })
-  process.exit(result.status ?? 1)
-}
-
 // ── Test element tree ────────────────────────────────────────────────
 
 export interface TestElement {
@@ -137,6 +120,7 @@ export interface TestElement {
   events: Set<string>
   children: number[]
   parentId: number | null
+  testId?: string
   customProps?: Record<string, unknown>
 }
 
@@ -148,13 +132,13 @@ export class TestRenderer implements NativeRenderer {
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
 
-  constructor() {
+  constructor(options: TestWindowOptions = {}) {
     if (!NativeTestRenderer) {
       throw new Error(
         "Native TestGpuixRenderer not available. Build with test-support to run tests."
       )
     }
-    this.native = new NativeTestRenderer()
+    this.native = new NativeTestRenderer(options.width, options.height)
   }
 
   // ── NativeRenderer interface (all mutations delegate to native) ──
@@ -293,9 +277,14 @@ export class TestRenderer implements NativeRenderer {
 
   /** End-to-end: simulate a click through GPUI hit testing →
    *  dispatch resulting events to React. */
-  nativeSimulateClick(x: number, y: number): void {
+  nativeSimulateClick(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateClick(x, y)
+    this.native.simulateClick(x, y, button, modifiers)
     this.dispatchNativeEvents()
     // Flush again after React state updates so the Rust RetainedTree
     // is fully rebuilt and GPUI has re-laid-out before any screenshot.
@@ -308,29 +297,52 @@ export class TestRenderer implements NativeRenderer {
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    modifiers?: string
   ): void {
     this.native.flush()
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
     this.dispatchNativeEvents()
   }
 
+  /** Dispatch a wheel without the surrounding flushes, for perf sampling.
+   *  Call `flush()` yourself, or the sample is the React update only and
+   *  none of the GPUI build, layout and paint that follows. */
   dispatchScrollWheel(
     x: number,
     y: number,
     deltaX: number,
-    deltaY: number
+    deltaY: number,
+    modifiers?: string
   ): void {
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
+    this.dispatchNativeEvents()
+  }
+
+  /** Dispatch a move without the surrounding flushes, for perf sampling.
+   *  `nativeSimulateMouseMove` flushes before and after, so a drag timed with
+   *  it contains two complete paints and cannot be compared to a wheel. */
+  dispatchMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void {
+    this.native.simulateMouseMove(x, y, pressedButton, modifiers)
     this.dispatchNativeEvents()
   }
 
   /** End-to-end: simulate mouse move through GPUI →
    *  dispatch resulting events to React.
    *  @param pressedButton - optional button held during move (0=left, 1=middle, 2=right) for drag simulation */
-  nativeSimulateMouseMove(x: number, y: number, pressedButton?: number): void {
+  nativeSimulateMouseMove(
+    x: number,
+    y: number,
+    pressedButton?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseMove(x, y, pressedButton)
+    this.native.simulateMouseMove(x, y, pressedButton, modifiers)
     this.dispatchNativeEvents()
     // Flush again after React state updates so hover styles are applied
     // and the Rust tree is current before any screenshot.
@@ -340,9 +352,14 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate mouse down through GPUI hit testing →
    *  dispatch resulting events to React.
    *  @param button - 0=left (default), 1=middle, 2=right */
-  nativeSimulateMouseDown(x: number, y: number, button?: number): void {
+  nativeSimulateMouseDown(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseDown(x, y, button ?? 0)
+    this.native.simulateMouseDown(x, y, button ?? 0, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -350,9 +367,14 @@ export class TestRenderer implements NativeRenderer {
   /** End-to-end: simulate mouse up through GPUI hit testing →
    *  dispatch resulting events to React.
    *  @param button - 0=left (default), 1=middle, 2=right */
-  nativeSimulateMouseUp(x: number, y: number, button?: number): void {
+  nativeSimulateMouseUp(
+    x: number,
+    y: number,
+    button?: number,
+    modifiers?: string
+  ): void {
     this.native.flush()
-    this.native.simulateMouseUp(x, y, button ?? 0)
+    this.native.simulateMouseUp(x, y, button ?? 0, modifiers)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -374,6 +396,7 @@ export class TestRenderer implements NativeRenderer {
         events: new Set(node.events ?? []),
         children: (node.children ?? []).map((c: any) => c.id),
         parentId,
+        ...(node.testId ? { testId: node.testId } : {}),
         ...(node.customProps ? { customProps: node.customProps } : {}),
       })
       for (const child of node.children ?? []) {
@@ -406,6 +429,10 @@ export class TestRenderer implements NativeRenderer {
     return [...this.buildElementMap().values()].find(
       (el) => el.text != null && el.text.includes(text)
     )
+  }
+
+  findByTestId(testId: string): TestElement | undefined {
+    return [...this.buildElementMap().values()].find((el) => el.testId === testId)
   }
 
   /** Get all text content in the tree (depth-first). */
@@ -448,6 +475,11 @@ export class TestRenderer implements NativeRenderer {
     this.dispatchNativeEvents()
   }
 
+  /** The offscreen window size, so `useWindowSize()` works under test. */
+  getWindowSize(): { width: number; height: number } {
+    return this.native.getWindowSize()
+  }
+
   // ── Scroll API ──────────────────────────────────────────────────
 
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
@@ -464,6 +496,14 @@ export class TestRenderer implements NativeRenderer {
   scrollToItem(elementId: number, index: number): void {
     this.native.flush()
     this.native.scrollToItem(elementId, index)
+    this.dispatchNativeEvents()
+    this.native.flush()
+  }
+
+  /** Scroll ancestors until the element is in view, as web scrollIntoView. */
+  scrollIntoView(elementId: number, block?: string, inline?: string): void {
+    this.native.flush()
+    this.native.scrollIntoView(elementId, block, inline)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -507,6 +547,14 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getPaintedText()
   }
 
+  /** Every highlight wash painted in the last frame, in paint order.
+   *
+   *  A quad never lands in `getPaintedText()`, and a soft-wrapped match must
+   *  draw one box per visual row, so each entry carries its `rects`. */
+  getPaintedHighlights(): HighlightMatch[] {
+    return this.native.getPaintedHighlights()
+  }
+
   /** Syntax-cache counters as `[hits, misses, documents]`. */
   getSyntaxCacheStats(): [number, number, number] {
     const [hits, misses, documents] = this.native.getSyntaxCacheStats()
@@ -548,8 +596,7 @@ export class TestRenderer implements NativeRenderer {
     this.native.resetStyleResolutions()
   }
 
-  /** Capture a screenshot of the current rendered UI and save as PNG.
-   *  macOS only — requires Metal GPU rendering via VisualTestAppContext. */
+  /** Capture the current Metal or DirectX frame and save it as a PNG. */
   captureScreenshot(path: string): void {
     this.native.flush()
     this.native.captureScreenshot(path)
@@ -582,9 +629,13 @@ export interface TestRoot {
  * All mutations go to the real GPUI pipeline via native TestGpuixRenderer.
  * Returns the Root (for rendering), the TestRenderer (for inspection/events),
  * and convenience methods.
+ *
+ * Pass `width` / `height` to size the offscreen window. The 1280x800 default is
+ * wide enough to keep a centered max-width column capped, so a layout test that
+ * needs to observe re-wrapping must ask for a narrower window.
  */
-export function createTestRoot(options: RootOptions = {}): TestRoot {
-  const renderer = new TestRenderer()
+export function createTestRoot(options: TestWindowOptions & RootOptions = {}): TestRoot {
+  const renderer = new TestRenderer(options)
   const root = createRoot(renderer, options)
 
   const render = (node: ReactNode): void => {

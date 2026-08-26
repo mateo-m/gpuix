@@ -19,12 +19,31 @@ import { hostConfig } from "./host-config.js"
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export const reconciler = ReactReconciler(hostConfig as any)
 
-// Inject into DevTools if available
+/**
+ * Register with the React DevTools global hook.
+ *
+ * This is not only for DevTools, and it is not optional. React Fast Refresh
+ * reaches a renderer through the same hook: `react-refresh` patches
+ * `hook.inject`, keeps the `scheduleRefresh` and `setRefreshHandler` helpers
+ * this call passes in, and drives hot updates through them.
+ *
+ * Drop this call and there is **no error and no page reload**. Bun still marks
+ * the edited module self-accepting and still calls `performReactRefresh()`,
+ * which iterates zero mounted roots and schedules nothing. The bundle updates
+ * and the painted UI silently stays stale.
+ *
+ * The hook has to already exist when this module evaluates. Bun's HMR runtime
+ * calls `injectIntoGlobalHook(window)` during bundle init, so it does in the
+ * dev server, and `injectIntoDevTools()` is a no-op returning `false` in plain
+ * Node. Do not test that return value: it ends in `hook.checkDCE ? true : false`
+ * and `react-refresh` installs no `checkDCE`, so a working injection still
+ * reports `false`. `fast-refresh.test.tsx` asserts the observable behaviour.
+ */
 try {
   // @ts-expect-error the types for `react-reconciler` are not up to date with the library
   reconciler.injectIntoDevTools()
 } catch {
-  // DevTools not available
+  // No DevTools hook in this process.
 }
 
 const _r = reconciler as typeof reconciler & {

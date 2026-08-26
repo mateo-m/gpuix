@@ -5,6 +5,8 @@ import { createRoot, flushSync, type Root } from "./reconciler.js"
 import type { DebugFrameOverlayMode, NativeRenderer, RootOptions } from "../types/host.js"
 import { handleGpuixEvent } from "./event-registry.js"
 import {
+  App as AutomationApp,
+  browserRendererAsTest,
   InProcessBackend,
   liveRendererAsTest,
   serveAutomationStdio,
@@ -30,7 +32,7 @@ export function createRenderer(
     }
   })
   // A pipe means a controller owns stdin. A TTY is a human keyboard.
-  if (!process.stdin.isTTY) {
+  if (typeof process !== "undefined" && process.stdin && !process.stdin.isTTY) {
     const init = renderer.init.bind(renderer)
     renderer.init = (options) => {
       init(options)
@@ -112,6 +114,24 @@ export function startFrameLoop(
 }
 
 const RENDER_HOST_KEY = "__gpuixRenderHost"
+const BROWSER_AUTOMATION_KEY = "gpuix"
+
+declare global {
+  var gpuix: AutomationApp | undefined
+}
+
+export function installBrowserAutomation(
+  renderer: LiveAutomationRenderer
+): AutomationApp {
+  const existing = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
+  if (existing instanceof AutomationApp) return existing
+
+  const automation = new AutomationApp(
+    new InProcessBackend(browserRendererAsTest(renderer))
+  )
+  Reflect.set(globalThis, BROWSER_AUTOMATION_KEY, automation)
+  return automation
+}
 
 type RenderSlot = {
   renderer?: NativeRenderer
@@ -140,6 +160,9 @@ export function resetRender(): void {
   const slot = Reflect.get(globalThis, RENDER_HOST_KEY) as RenderSlot | undefined
   slot?.loop?.stop()
   slot?.root?.unmount()
+  const automation = Reflect.get(globalThis, BROWSER_AUTOMATION_KEY)
+  void automation?.close()
+  Reflect.deleteProperty(globalThis, BROWSER_AUTOMATION_KEY)
   Reflect.deleteProperty(globalThis, RENDER_HOST_KEY)
 }
 
@@ -161,6 +184,13 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const host = slot.renderer
   if (!host) {
     throw new Error("GPUIX renderer is not initialized")
+  }
+  if (
+    typeof window !== "undefined" &&
+    host instanceof GpuixRenderer &&
+    !Reflect.has(globalThis, BROWSER_AUTOMATION_KEY)
+  ) {
+    installBrowserAutomation(host)
   }
   if (debugFrameOverlay) {
     host.setDebugFrameOverlay?.(debugFrameOverlay)

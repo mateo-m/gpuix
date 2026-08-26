@@ -1,8 +1,10 @@
 {
   "name": "@gpuix/native",
-  "version": "0.4.0",
+  "version": "0.5.0",
+  "license": "Apache-2.0",
   "main": "index.js",
   "types": "index.d.ts",
+  "browser": "browser.mjs",
   "napi": {
     "binaryName": "gpuix-native",
     "targets": [
@@ -25,9 +27,10 @@
   "scripts": {
     "artifacts": "napi artifacts",
     "build": "napi build --platform --release --features test-support",
-    "build:release": "napi build --platform --release",
+    "build:release": "napi build --platform --release --no-default-features",
     "build:debug": "napi build --platform --features test-support",
-    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/native locally. CI builds all platform binaries. See AGENTS.md.'); process.exit(1) }\" && napi pre-publish -t npm --no-gh-release",
+    "build:web": "bun ../../scripts/web.ts --build-only",
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/native locally. CI builds all platform binaries. See AGENTS.md.'); process.exit(1) }\" && bun run build:web && napi pre-publish -t npm --no-gh-release",
     "universal": "napi universal",
     "version": "napi version"
   },
@@ -37,6 +40,8 @@
   "files": [
     "index.js",
     "index.d.ts",
-    "*.node"
+    "browser.mjs",
+    "wasm",
+    "LICENSE"
   ]
 }
