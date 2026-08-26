@@ -1,22 +1,39 @@
 import type { EventPayload } from "@gpuix/native"
 import type { Container, EventHandlerMap, NativeRenderer } from "../types/host.js"
 
-const containersByRenderer = new WeakMap<NativeRenderer, Container>()
+/// The map from renderer to container lives on globalThis, not in this
+/// module. Under `bun --hot` a reload evaluates this module again, but the
+/// native renderer keeps the event callback from the first evaluation.
+/// That old callback must find the container the new evaluation attached,
+/// so both evaluations have to share one map.
+const CONTAINERS_KEY = "__gpuixEventContainers"
+
+function containersByRenderer(): WeakMap<NativeRenderer, Container> {
+  const existing = Reflect.get(globalThis, CONTAINERS_KEY) as
+    | WeakMap<NativeRenderer, Container>
+    | undefined
+  if (existing) {
+    return existing
+  }
+  const created = new WeakMap<NativeRenderer, Container>()
+  Reflect.set(globalThis, CONTAINERS_KEY, created)
+  return created
+}
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
-  containersByRenderer.set(renderer, container)
+  containersByRenderer().set(renderer, container)
 }
 
 export function detachRoot(renderer: NativeRenderer): void {
-  containersByRenderer.delete(renderer)
+  containersByRenderer().delete(renderer)
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {
-  return containersByRenderer.get(renderer)
+  return containersByRenderer().get(renderer)
 }
 
 export function handleGpuixEvent(payload: EventPayload, renderer: NativeRenderer): void {
-  const container = containersByRenderer.get(renderer)
+  const container = containersByRenderer().get(renderer)
   if (!container) return
   const elementHandlers = container.eventHandlers.get(payload.elementId)
   if (!elementHandlers) return

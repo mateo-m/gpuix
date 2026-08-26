@@ -117,6 +117,9 @@ type RenderSlot = {
   renderer?: NativeRenderer
   root?: Root
   loop?: FrameLoop
+  /// The `onEvent` of the latest `render()` call. The native callback closes
+  /// over the slot, not over the option, so a hot reload can swap it.
+  onEvent?: (event: EventPayload) => void
 }
 
 function renderSlot(): RenderSlot {
@@ -148,11 +151,12 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
   const { onEvent, renderer: injected, debugFrameOverlay, resolveClassName, ...windowOptions } = options
   const slot = renderSlot()
   const remount = slot.root != null
+  slot.onEvent = onEvent
   if (!slot.renderer) {
     if (injected) {
       slot.renderer = injected
     } else {
-      const renderer = createRenderer(onEvent)
+      const renderer = createRenderer((event) => slot.onEvent?.(event))
       renderer.init(windowOptions)
       slot.renderer = renderer
       console.log("[gpuix] created native window")
