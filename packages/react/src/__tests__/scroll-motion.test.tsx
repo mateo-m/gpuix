@@ -124,6 +124,28 @@ describeNative("scroll snap", () => {
     expect(offsetY(id)).toBe(-100)
   })
 
+  it("the sub-pixel tail of a scroll does not delay the snap", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(<Box style={{ scrollSnapType: "y mandatory" }} rows={rows} />)
+    const id = boxId()
+    // A real move, then a tail of steps under half a pixel, the way a
+    // wheel coasts. The tail must not reset the idle timer.
+    root.renderer.scrollTo(id, 0, -130, "instant")
+    for (let i = 1; i <= 4; i++) {
+      root.renderer.clockFastForward(16)
+      root.renderer.scrollTo(id, 0, -130 - 0.3 * i, "instant")
+    }
+    // 124ms after the real move the glide is armed. 320ms more lands
+    // it. The old 150ms window, reset by the tail, would still glide.
+    root.renderer.clockFastForward(60)
+    root.renderer.flush()
+    root.renderer.flush()
+    root.renderer.clockFastForward(320)
+    root.renderer.flush()
+    root.renderer.flush()
+    expect(offsetY(id)).toBe(-100)
+  })
+
   it("proximity gives up beyond half a viewport", () => {
     const rows = plain(8).map((_, i) =>
       i === 0 || i === 7 ? { scrollSnapAlign: "start" } : {}
@@ -145,6 +167,53 @@ describeNative("scroll snap", () => {
     root.renderer.scrollTo(id, 0, -440, "instant")
     settle()
     expect(offsetY(id)).toBe(-200)
+  })
+})
+
+describeNative("the container option of scrollIntoView", () => {
+  /** An outer scroll box that holds a filler row and an inner one. */
+  function Nested() {
+    return (
+      <div testId="outer" style={{ width: 200, height: 200, overflowY: "auto" }}>
+        <div style={{ width: 200, height: 300, flexShrink: 0 }} />
+        <div
+          testId="inner"
+          style={{ width: 200, height: 200, overflowY: "auto", flexShrink: 0 }}
+        >
+          {plain(6).map((_, i) => (
+            <div
+              key={i}
+              testId={`inner-row-${i}`}
+              style={{ width: 200, height: 100, flexShrink: 0 }}
+            />
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  it("nearest scrolls only the nearest scroll box", () => {
+    const root = createTestRoot()
+    root.render(<Nested />)
+    const outer = root.renderer.findByTestId("outer")!
+    const inner = root.renderer.findByTestId("inner")!
+    const target = root.renderer.findByTestId("inner-row-3")!
+    root.renderer.scrollIntoView(target.id, "start", undefined, undefined, "nearest")
+    expect(root.renderer.getScrollOffset(inner.id)![1]).toBe(-300)
+    expect(root.renderer.getScrollOffset(outer.id)![1]).toBe(0)
+    root.unmount()
+  })
+
+  it("all, the default, scrolls every ancestor", () => {
+    const root = createTestRoot()
+    root.render(<Nested />)
+    const outer = root.renderer.findByTestId("outer")!
+    const inner = root.renderer.findByTestId("inner")!
+    const target = root.renderer.findByTestId("inner-row-3")!
+    root.renderer.scrollIntoView(target.id, "start")
+    expect(root.renderer.getScrollOffset(inner.id)![1]).toBe(-300)
+    expect(root.renderer.getScrollOffset(outer.id)![1]).toBe(-300)
+    root.unmount()
   })
 })
 

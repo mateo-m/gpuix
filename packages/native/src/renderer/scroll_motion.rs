@@ -27,12 +27,16 @@ use crate::motion::{ease, mix, MotionEase};
 use crate::retained_tree::RetainedTree;
 use crate::style::StyleDesc;
 
-use super::scroll_into_view::{axis_delta, scroll_into_view, scroll_margin, scroll_padding, Align};
+use super::scroll_into_view::{
+    axis_delta, scroll_into_view, scroll_margin, scroll_padding, Align, Container,
+};
 
 /// How long a smooth scroll takes, in seconds.
 const SMOOTH_SECONDS: f64 = 0.3;
-/// How long the offset must rest before a snap container snaps.
-const IDLE_SECONDS: f64 = 0.15;
+/// How long the offset must rest before a snap container snaps. A step
+/// under half a pixel does not reset the timer, so the glide starts
+/// during the momentum tail of a wheel instead of after it.
+const IDLE_SECONDS: f64 = 0.08;
 
 fn smooth_ease() -> MotionEase {
     MotionEase::Name("easeInOut".to_string())
@@ -200,9 +204,15 @@ fn initial_targets(tree: &RetainedTree, handles: &HashMap<u64, ScrollHandle>) ->
                 waiting = true;
                 continue;
             }
-            scroll_into_view(tree, id, Align::Start, Align::Nearest, Behavior::Auto, |id| {
-                handles.get(&id).cloned()
-            });
+            scroll_into_view(
+                tree,
+                id,
+                Align::Start,
+                Align::Nearest,
+                Behavior::Auto,
+                Container::All,
+                |id| handles.get(&id).cloned(),
+            );
             done.insert(id);
         }
     });
@@ -295,13 +305,22 @@ fn snap_containers(
                 continue;
             }
             if offset != state.offset {
+                let step = f32::from(offset.x - state.offset.x)
+                    .abs()
+                    .max(f32::from(offset.y - state.offset.y).abs());
                 if state.moved_at.is_none() {
                     state.from = state.offset;
+                    state.moved_at = Some(now);
+                } else if step >= 0.5 {
+                    state.moved_at = Some(now);
                 }
-                state.moved_at = Some(now);
                 state.offset = offset;
-                active = true;
-                continue;
+                if step >= 0.5 {
+                    active = true;
+                    continue;
+                }
+                // A step under half a pixel is the momentum tail. Fall
+                // through to the idle check, so the snap starts early.
             }
             let Some(moved_at) = state.moved_at else {
                 continue;

@@ -158,6 +158,23 @@ pub(crate) fn axis_delta(align: Align, start: f32, end: f32, port_start: f32, po
     }
 }
 
+/// Which ancestors scroll: every one, or only the nearest scroll box.
+/// The web `container` option, from CSSOM View. `all` is the default.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum Container {
+    All,
+    Nearest,
+}
+
+impl Container {
+    pub(crate) fn parse(word: Option<&str>) -> Container {
+        match word.map(str::trim) {
+            Some("nearest") => Container::Nearest,
+            _ => Container::All,
+        }
+    }
+}
+
 /// Scroll every ancestor scroll box of `target` so the element shows.
 /// Returns true when an offset changed.
 pub(crate) fn scroll_into_view(
@@ -166,6 +183,7 @@ pub(crate) fn scroll_into_view(
     block: Align,
     inline: Align,
     behavior: super::scroll_motion::Behavior,
+    container: Container,
     handle_for: impl Fn(u64) -> Option<ScrollHandle>,
 ) -> bool {
     let Some(bounds) = crate::automation::get_bounds(target) else {
@@ -214,6 +232,9 @@ pub(crate) fn scroll_into_view(
             rect.end.x += f32::from(new.x - old.x);
             rect.start.y += f32::from(new.y - old.y);
             rect.end.y += f32::from(new.y - old.y);
+            if container == Container::Nearest {
+                break;
+            }
         }
         current = tree.elements.get(&id).and_then(|el| el.parent);
     }

@@ -837,8 +837,17 @@ export interface NativeRenderer {
   /** Scroll every ancestor scroll box so the element shows, like the web
    *  scrollIntoView. block places it on the y axis and inline on the x
    *  axis: "start", "center", "end" or "nearest". The defaults match the
-   *  web: "start" and "nearest". behavior works like the scrollTo one. */
-  scrollIntoView?(elementId: number, block?: string, inline?: string, behavior?: string): void
+   *  web: "start" and "nearest". behavior works like the scrollTo one.
+   *  container is "all" (the default) or "nearest", the web option:
+   *  "nearest" scrolls only the nearest scroll box, so outer views
+   *  stay put. */
+  scrollIntoView?(
+    elementId: number,
+    block?: string,
+    inline?: string,
+    behavior?: string,
+    container?: string,
+  ): void
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset?(elementId: number): Array<number> | null
 

@@ -296,6 +296,7 @@ enum UiCommand {
         block: scroll_into_view::Align,
         inline: scroll_into_view::Align,
         behavior: scroll_motion::Behavior,
+        container: scroll_into_view::Container,
     },
     ViewTransitionCapture,
     ViewTransitionStart {
@@ -435,13 +436,20 @@ async fn run_ui_commands(
                 block,
                 inline,
                 behavior,
+                container,
             } => {
                 window
                     .update(cx, |view, _window, _cx| {
                         let tree = view.tree.lock().unwrap();
-                        scroll_into_view::scroll_into_view(&tree, id, block, inline, behavior, |id| {
-                            SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
-                        });
+                        scroll_into_view::scroll_into_view(
+                            &tree,
+                            id,
+                            block,
+                            inline,
+                            behavior,
+                            container,
+                            |id| SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned()),
+                        );
                     })
                     .ok();
                 refresh_ui_window(window, cx)
@@ -1255,7 +1263,8 @@ impl GpuixRenderer {
     /// `inline` on the x axis: `start`, `center`, `end` or `nearest`.
     /// The defaults match the web: `start` and `nearest`. The
     /// `scroll-margin` of the element and the `scroll-padding` of each
-    /// box apply.
+    /// box apply. `container: "nearest"` scrolls only the nearest scroll
+    /// box, like the web option, so the outer view stays put.
     #[napi]
     pub fn scroll_into_view(
         &self,
@@ -1263,16 +1272,18 @@ impl GpuixRenderer {
         block: Option<String>,
         inline: Option<String>,
         behavior: Option<String>,
+        container: Option<String>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let block = scroll_into_view::Align::parse(block.as_deref(), scroll_into_view::Align::Start);
         let inline =
             scroll_into_view::Align::parse(inline.as_deref(), scroll_into_view::Align::Nearest);
         let behavior = scroll_motion::Behavior::parse(behavior.as_deref());
+        let container = scroll_into_view::Container::parse(container.as_deref());
         #[cfg(target_os = "macos")]
         {
             let tree = self.tree.lock().unwrap();
-            scroll_into_view::scroll_into_view(&tree, id, block, inline, behavior, |id| {
+            scroll_into_view::scroll_into_view(&tree, id, block, inline, behavior, container, |id| {
                 SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
             });
             drop(tree);
@@ -1285,6 +1296,7 @@ impl GpuixRenderer {
             block,
             inline,
             behavior,
+            container,
         });
 
         #[cfg(not(any(

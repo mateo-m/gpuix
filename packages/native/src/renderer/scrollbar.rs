@@ -111,8 +111,14 @@ pub(crate) fn scrolls(word: Option<&str>) -> bool {
 }
 
 impl Spec {
-    /// The spec for a box, or `None` when no axis scrolls.
-    pub(crate) fn from_style(style: &StyleDesc, mode: Mode) -> Option<Self> {
+    /// The spec for a box, or `None` when no axis scrolls. `color`
+    /// resolves one colour word, so `scrollbar-color: var(--thumb)
+    /// var(--track)` reads the cascade like every other colour.
+    pub(crate) fn from_style(
+        style: &StyleDesc,
+        mode: Mode,
+        color: &dyn Fn(&str) -> Option<Hsla>,
+    ) -> Option<Self> {
         let x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let y = style.overflow_y.as_deref().or(style.overflow.as_deref());
         let (x, y) = used_overflow(x, y);
@@ -133,7 +139,7 @@ impl Spec {
         let (thumb, track) = style
             .scrollbar_color
             .as_deref()
-            .map(scrollbar_colors)
+            .map(|value| scrollbar_colors(value, color))
             .unwrap_or((None, None));
         Some(Self {
             mode,
@@ -229,22 +235,27 @@ enum ThumbLook {
 ///
 /// CSS takes `auto` or exactly two colours. One colour, three words or a
 /// word that is not a colour drops the whole declaration, the way a browser
-/// drops a value it cannot parse.
-fn scrollbar_colors(value: &str) -> (Option<Hsla>, Option<Hsla>) {
+/// drops a value it cannot parse. `color` resolves one word, so a `var()`
+/// reads the cascade at the box.
+fn scrollbar_colors(
+    value: &str,
+    color: &dyn Fn(&str) -> Option<Hsla>,
+) -> (Option<Hsla>, Option<Hsla>) {
     let words = split_top_level(value);
     if words.len() != 2 {
         return (None, None);
     }
-    let color = |index: usize| {
-        words
-            .get(index)
-            .and_then(|word| crate::color::parse_color_rgba(word))
-            .map(Hsla::from)
-    };
+    let color = |index: usize| words.get(index).and_then(|word| color(word));
     match (color(0), color(1)) {
         (Some(thumb), Some(track)) => (Some(thumb), Some(track)),
         _ => (None, None),
     }
+}
+
+/// One colour word with no cascade behind it: literals only, no `var()`.
+#[cfg(test)]
+fn literal_color(word: &str) -> Option<Hsla> {
+    crate::color::parse_color_rgba(word).map(Hsla::from)
 }
 
 /// Splits on spaces outside parentheses, so `rgb(0 0 0 / 0.5) white` is
@@ -780,26 +791,42 @@ mod tests {
     fn colors_split_outside_parentheses() {
         let words = split_top_level("rgb(0 0 0 / 0.5)  white");
         assert_eq!(words, vec!["rgb(0 0 0 / 0.5)", "white"]);
-        let (thumb, track) = scrollbar_colors("rgb(0 0 0 / 0.5) white");
+        let (thumb, track) = scrollbar_colors("rgb(0 0 0 / 0.5) white", &literal_color);
         assert!(thumb.is_some_and(|c| (c.a - 0.5).abs() < 0.01));
         assert!(track.is_some_and(|c| c.l > 0.99));
-        assert_eq!(scrollbar_colors("auto"), (None, None));
+        assert_eq!(scrollbar_colors("auto", &literal_color), (None, None));
     }
 
     #[test]
     fn scrollbar_color_takes_auto_or_exactly_two_colors() {
         // One colour is not valid CSS, so the declaration drops.
-        assert_eq!(scrollbar_colors("red"), (None, None));
-        assert_eq!(scrollbar_colors("red white blue"), (None, None));
+        assert_eq!(scrollbar_colors("red", &literal_color), (None, None));
+        assert_eq!(scrollbar_colors("red white blue", &literal_color), (None, None));
         // A word that is not a colour drops both, not just itself.
-        assert_eq!(scrollbar_colors("red nonsense"), (None, None));
+        assert_eq!(scrollbar_colors("red nonsense", &literal_color), (None, None));
+    }
+
+    #[test]
+    fn scrollbar_color_reads_the_resolver_for_var_words() {
+        // The resolver stands in for the cascade, the way the render
+        // path resolves `scrollbar-color: var(--thumb) var(--track)`.
+        let resolve = |word: &str| match word {
+            "var(--thumb)" => Some(hsla(0.0, 0.0, 0.2, 1.0)),
+            "var(--track)" => Some(hsla(0.0, 0.0, 0.9, 1.0)),
+            _ => None,
+        };
+        let (thumb, track) = scrollbar_colors("var(--thumb) var(--track)", &resolve);
+        assert!(thumb.is_some_and(|c| (c.l - 0.2).abs() < 0.01));
+        assert!(track.is_some_and(|c| (c.l - 0.9).abs() < 0.01));
+        // An unset variable drops the declaration, like a bad colour.
+        assert_eq!(scrollbar_colors("var(--gone) white", &resolve), (None, None));
     }
 
     fn spec(overflow: &str, extra: impl FnOnce(&mut StyleDesc), mode: Mode) -> Spec {
         let mut style = StyleDesc::default();
         style.overflow = Some(overflow.to_string());
         extra(&mut style);
-        Spec::from_style(&style, mode).expect("a scroll box")
+        Spec::from_style(&style, mode, &literal_color).expect("a scroll box")
     }
 
     #[test]
@@ -847,9 +874,9 @@ mod tests {
         let mut style = StyleDesc::default();
         style.overflow_y = Some("scroll".into());
         style.overflow_x = Some("hidden".into());
-        let spec = Spec::from_style(&style, Mode::Classic).unwrap();
+        let spec = Spec::from_style(&style, Mode::Classic, &literal_color).unwrap();
         assert_eq!(spec.reserved(point(true, true)), point(px(0.0), px(15.0)));
         style.overflow_y = Some("clip".into());
-        assert!(Spec::from_style(&style, Mode::Classic).is_none());
+        assert!(Spec::from_style(&style, Mode::Classic, &literal_color).is_none());
     }
 }
