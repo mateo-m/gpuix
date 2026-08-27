@@ -2978,6 +2978,7 @@ impl GpuixView {
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
             vt: self.view_transition.as_ref(),
+            frozen: false,
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -3211,7 +3212,7 @@ impl gpui::Render for GpuixView {
                 .is_some_and(|element| element.custom_props.contains_key("highlight"))
         });
         let mut highlight_events = Vec::new();
-        let result = match tree.root_id {
+        let (result, exit_copies) = match tree.root_id {
             Some(root_id) => {
                 let mut ctx = BuildCtx {
                     tree: &tree,
@@ -3230,10 +3231,15 @@ impl gpui::Render for GpuixView {
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
                     vt: view_transition.as_ref(),
+                    frozen: false,
                 };
-                build_element(root_id, &mut ctx, window, cx)
+                let root = build_element(root_id, &mut ctx, window, cx);
+                // Names captured without a successor paint as frozen copies
+                // over the tree. Built after the root, so they paint last.
+                let copies = view_transition::exit_copies(&mut ctx, window, cx);
+                (root, copies)
             }
-            None => gpui::Empty.into_any_element(),
+            None => (gpui::Empty.into_any_element(), Vec::new()),
         };
         // A transition animates every frame until it comes to rest.
         if view_transition.is_some() {
@@ -3258,6 +3264,7 @@ impl gpui::Render for GpuixView {
                 .child(selection_frame_reset(self.selection.clone()))
                 .child(crate::automation::bounds_frame_reset())
                 .child(result)
+                .children(exit_copies)
                 .into_any_element()
         };
 

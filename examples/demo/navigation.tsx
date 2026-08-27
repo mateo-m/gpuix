@@ -1,40 +1,63 @@
 /// View transitions, shown as the push and pop of the iOS Settings app.
 ///
-/// The two screens carry the same `viewTransitionName`, so one
-/// `startViewTransition` call animates them as a pair. On a push, the new
-/// screen slides in from the right over the old one, and the old one slides
-/// 30% of its width to the left. On a pop, the same move runs backwards, and
-/// the leaving screen stays on top while it slides out.
+/// The header stays mounted the whole time, and only its content takes part
+/// in the transition. The back button enters and leaves through a blur and
+/// opacity pair. The title of each screen carries the name "nav-title", so
+/// the old title slides and blurs out while the new one slides and blurs in.
+/// The screens slide under the header as a pair, and a backdrop blur with an
+/// eased mask blurs the rows progressively where they pass under it.
 
 import React, { useState } from "react"
 import { startViewTransition, useGpuix } from "@gpuix/react"
 import type { NativeRenderer, ViewTransitionOptions } from "@gpuix/react"
 import { Panel } from "./ui.js"
 
+const HEADER_HEIGHT = 56
+/// How far past the bar the backdrop blur fades out.
+const BLUR_TAIL = 28
+
 const PUSH: ViewTransitionOptions = {
+  duration: 0.35,
+  ease: "easeOut",
   groups: {
     screen: {
-      duration: 0.35,
-      ease: "easeOut",
       old: { translateX: ["0%", "-30%"] },
       new: { translateX: ["100%", "0%"] },
+    },
+    "nav-back": { new: { opacity: [0, 1], blur: [6, 0] } },
+    "nav-title": {
+      old: { opacity: [1, 0], translateX: ["0%", "-40%"], blur: [0, 4] },
+      new: { opacity: [0, 1], translateX: ["40%", "0%"], blur: [4, 0] },
     },
   },
 }
 
 const POP: ViewTransitionOptions = {
+  duration: 0.35,
+  ease: "easeOut",
   groups: {
     screen: {
-      duration: 0.35,
-      ease: "easeOut",
       old: { translateX: ["0%", "100%"], onTop: true },
       new: { translateX: ["-30%", "0%"] },
+    },
+    "nav-back": { old: { opacity: [1, 0], blur: [0, 6] } },
+    "nav-title": {
+      old: { opacity: [1, 0], translateX: ["0%", "40%"], blur: [0, 4] },
+      new: { opacity: [0, 1], translateX: ["-40%", "0%"], blur: [4, 0] },
     },
   },
 }
 
-const GENERAL_ROWS = ["About", "Software Update", "Storage", "AppleCare", "AirDrop"]
-const ROOT_ROWS = ["General", "Display", "Sound", "Focus", "Battery"]
+const ROOT_ROWS = [
+  "General", "Display", "Sound", "Focus", "Battery",
+  "Privacy", "Wallpaper", "Siri", "Wallet", "Accounts",
+  "App Store", "Game Center", "Developer",
+]
+const GENERAL_ROWS = [
+  "About", "Software Update", "Storage", "AppleCare", "AirDrop",
+  "AirPlay", "Picture in Picture", "CarPlay", "Keyboard", "Fonts",
+  "Language", "Dictionary", "VPN", "Legal",
+]
 
 function NavRow({ label, detail, onClick }: {
   label: string
@@ -59,33 +82,81 @@ function NavRow({ label, detail, onClick }: {
   )
 }
 
-function TitleBar({ title, onBack }: { title: string; onBack?: () => void }) {
+/// The header that never unmounts. The first layer is the progressive blur:
+/// a backdrop blur whose eased mask fades it out past the bar, so the rows
+/// blur where they pass under it. The title and the back button sit on top
+/// of that layer, and each carries its own view transition name.
+function Header({ screen, onBack }: {
+  screen: "root" | "general"
+  onBack: () => void
+}) {
+  const title = screen === "root" ? "Settings" : "General"
   return (
-    <div
-      className="row items-center gap-2 px-3 py-3"
-      style={{ flexShrink: 0, borderBottomWidth: 1, borderColor: "var(--color-line)" }}
-    >
-      {onBack ? (
-        <div testId="nav-back" className="row pointer select-none px-1" onClick={onBack}>
-          <text className="text-sm" style={{ color: "var(--color-brand)" }}>{"< Settings"}</text>
+    <>
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: HEADER_HEIGHT + BLUR_TAIL,
+          backdropFilter: "blur(16px) saturate(160%)",
+          maskImage: "linear-gradient(to bottom, black 50%, ease-in-out, transparent)",
+          backgroundColor: "rgb(10 10 14 / 0.4)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        className="row items-center"
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: HEADER_HEIGHT,
+          justifyContent: "center",
+          borderBottomWidth: 1,
+          borderColor: "var(--color-line)",
+          pointerEvents: "none",
+        }}
+      >
+        <div key={screen} testId={`nav-title-${screen}`} style={{ viewTransitionName: "nav-title" }}>
+          <text className="text-sm font-semibold text-fg">{title}</text>
         </div>
-      ) : null}
-      <div className="grow" />
-      <text className="text-sm font-semibold text-fg">{title}</text>
-      <div className="grow" />
-      {onBack ? <div style={{ width: 70 }} /> : null}
-    </div>
+      </div>
+      <div
+        className="row items-center px-2"
+        style={{ position: "absolute", top: 0, left: 0, height: HEADER_HEIGHT }}
+      >
+        {screen === "general" ? (
+          <div
+            testId="nav-back"
+            className="row pointer select-none px-1"
+            style={{ viewTransitionName: "nav-back" }}
+            onClick={onBack}
+          >
+            <text className="text-sm" style={{ color: "var(--color-brand)" }}>{"< Settings"}</text>
+          </div>
+        ) : null}
+      </div>
+    </>
   )
 }
 
 /// One screen of the stack. The name pairs it with the screen it replaces,
 /// and the key makes React mount a new element instead of an update in
-/// place, the way a real navigation swaps components.
+/// place, the way a real navigation swaps components. The top padding puts
+/// the first row under the header, and the rows scroll under it.
 function Screen({ children }: { children: React.ReactNode }) {
   return (
     <div
       className="col w-full h-full"
-      style={{ viewTransitionName: "screen", backgroundColor: "var(--color-panel)" }}
+      style={{
+        viewTransitionName: "screen",
+        backgroundColor: "var(--color-panel)",
+        overflowY: "scroll",
+        paddingTop: HEADER_HEIGHT,
+      }}
     >
       {children}
     </div>
@@ -105,11 +176,16 @@ function Phone({ renderer }: { renderer: NativeRenderer | null }) {
   return (
     <div
       className="col rounded border"
-      style={{ width: 320, height: 440, flexShrink: 0, overflow: "hidden" }}
+      style={{
+        width: 320,
+        height: 440,
+        flexShrink: 0,
+        overflow: "hidden",
+        position: "relative",
+      }}
     >
       {screen === "root" ? (
         <Screen key="root">
-          <TitleBar title="Settings" />
           {ROOT_ROWS.map((label) => (
             <NavRow
               key={label}
@@ -120,12 +196,12 @@ function Phone({ renderer }: { renderer: NativeRenderer | null }) {
         </Screen>
       ) : (
         <Screen key="general">
-          <TitleBar title="General" onBack={() => go("root", POP)} />
           {GENERAL_ROWS.map((label) => (
             <NavRow key={label} label={label} detail="" />
           ))}
         </Screen>
       )}
+      <Header screen={screen} onBack={() => go("root", POP)} />
     </div>
   )
 }
@@ -135,7 +211,7 @@ export function Navigation() {
   return (
     <Panel
       title="View transitions"
-      note="Click General to push its screen. It slides in from the right over the Settings screen, and Settings slides 30% of its width to the left. The back button runs the same move backwards, with the leaving screen on top. One startViewTransition call around the state change drives the whole pair."
+      note="Click General to push its screen. The screens slide as a pair under a header that never unmounts. The back button enters through a blur and opacity pair and leaves the same way, and the title morphs between Settings and General. The strip under the header is a backdrop blur with an eased mask, so the rows blur progressively as they scroll under it."
     >
       <Phone renderer={renderer ?? null} />
     </Panel>
