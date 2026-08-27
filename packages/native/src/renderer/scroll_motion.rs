@@ -94,10 +94,140 @@ struct SnapState {
     from: Point<Pixels>,
 }
 
+/// One trackpad gesture on a snap container, from the fingers going down
+/// to the momentum after they lift.
+struct Gesture {
+    /// The wheel deltas while the fingers are down, with their times.
+    /// The lift reads its velocity from the newest of these.
+    samples: Vec<(Instant, Point<Pixels>)>,
+    /// The offset when the fingers went down, for `scroll-snap-stop`.
+    from: Point<Pixels>,
+    /// The fingers are on the pad.
+    down: bool,
+    /// The fingers lifted and a snap glide runs. The OS keeps sending
+    /// momentum events, and they are consumed so they cannot cancel it.
+    coasting: bool,
+}
+
+/// A fling travels about this long at its lift velocity before the OS
+/// decay ends it. macOS decays momentum near 0.998 per millisecond, and
+/// that series sums to half a second of travel at the lift speed.
+const MOMENTUM_SECONDS: f32 = 0.5;
+/// Samples older than this play no part in the lift velocity.
+const VELOCITY_WINDOW_SECONDS: f64 = 0.1;
+
 thread_local! {
     static ANIMATIONS: RefCell<HashMap<u64, Animation>> = RefCell::new(HashMap::new());
     static SNAP: RefCell<HashMap<u64, SnapState>> = RefCell::new(HashMap::new());
     static INITIAL_DONE: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
+    static GESTURES: RefCell<HashMap<u64, Gesture>> = RefCell::new(HashMap::new());
+}
+
+/// A wheel event over a snap container, seen in the capture phase before
+/// the box scrolls. The web snaps a fling the moment the fingers lift, at
+/// the snap position nearest the predicted landing point. css-scroll-snap-1
+/// calls that point the intended end position. Returns true when the event
+/// must be consumed: the OS momentum stream after a lift, while the glide
+/// that lift started still runs.
+pub(crate) fn gesture_wheel(
+    tree: &RetainedTree,
+    handles: &HashMap<u64, ScrollHandle>,
+    id: u64,
+    handle: &ScrollHandle,
+    delta: Point<Pixels>,
+    phase: gpui::TouchPhase,
+    now: Instant,
+) -> bool {
+    use gpui::TouchPhase;
+    GESTURES.with(|cell| {
+        let mut gestures = cell.borrow_mut();
+        match phase {
+            TouchPhase::Started => {
+                gestures.insert(
+                    id,
+                    Gesture {
+                        samples: Vec::new(),
+                        from: handle.offset(),
+                        down: true,
+                        coasting: false,
+                    },
+                );
+                false
+            }
+            TouchPhase::Moved => {
+                let Some(gesture) = gestures.get_mut(&id) else {
+                    // A wheel with no phases, such as a mouse. The idle
+                    // watcher in `snap_containers` covers it.
+                    return false;
+                };
+                if gesture.down {
+                    gesture.samples.push((now, delta));
+                    gesture
+                        .samples
+                        .retain(|(at, _)| (now - *at).as_secs_f64() <= VELOCITY_WINDOW_SECONDS);
+                    return false;
+                }
+                if gesture.coasting {
+                    if ANIMATIONS.with(|cell| cell.borrow().contains_key(&id)) {
+                        return true;
+                    }
+                    gesture.coasting = false;
+                }
+                false
+            }
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                let Some(gesture) = gestures.get_mut(&id) else {
+                    return false;
+                };
+                if !gesture.down {
+                    return false;
+                }
+                gesture.down = false;
+                let style = tree.elements.get(&id).and_then(|el| el.style.as_deref());
+                let Some(snap) = snap_type(style) else {
+                    return false;
+                };
+                let landing = predicted_landing(handle, &gesture.samples, now);
+                if let Some(target) =
+                    snap_target(tree, id, snap, handle, gesture.from, landing, handles)
+                {
+                    if target != handle.offset() {
+                        animate(id, handle, target);
+                        gesture.coasting = true;
+                    }
+                }
+                false
+            }
+        }
+    })
+}
+
+/// Where the momentum of a lift would land the offset, clamped to the
+/// scrollable range.
+fn predicted_landing(
+    handle: &ScrollHandle,
+    samples: &[(Instant, Point<Pixels>)],
+    now: Instant,
+) -> Point<Pixels> {
+    let offset = handle.offset();
+    let span = samples
+        .first()
+        .map(|(at, _)| (now - *at).as_secs_f32())
+        .unwrap_or(0.0);
+    if span <= 0.001 {
+        return offset;
+    }
+    let sum = samples
+        .iter()
+        .fold(point(px(0.0), px(0.0)), |sum, (_, delta)| {
+            point(sum.x + delta.x, sum.y + delta.y)
+        });
+    let max = handle.max_offset();
+    let travel = |sum: Pixels| sum * (MOMENTUM_SECONDS / span);
+    point(
+        (offset.x + travel(sum.x)).max(-max.x).min(px(0.0)),
+        (offset.y + travel(sum.y)).max(-max.y).min(px(0.0)),
+    )
 }
 
 /// Glide the box from where it is to `to`. A second call replaces the
@@ -151,6 +281,10 @@ fn prune(tree: &RetainedTree) {
     INITIAL_DONE.with(|cell| {
         cell.borrow_mut()
             .retain(|id| tree.elements.contains_key(id))
+    });
+    GESTURES.with(|cell| {
+        cell.borrow_mut()
+            .retain(|id, _| tree.elements.contains_key(id))
     });
 }
 
@@ -330,7 +464,7 @@ fn snap_containers(
                 continue;
             }
             state.moved_at = None;
-            if let Some(target) = snap_target(tree, id, snap, handle, state.from, handles) {
+            if let Some(target) = snap_target(tree, id, snap, handle, state.from, offset, handles) {
                 if target != offset {
                     animate(id, handle, target);
                     active = true;
@@ -444,12 +578,17 @@ struct Candidate {
 }
 
 /// Where the container should come to rest, or `None` to stay put.
+/// The offset a rested container should sit at, or `None` to stay put.
+/// `at` is the natural end point of the scroll: the current offset for a
+/// box that came to rest, or the predicted landing of a fling. The spec
+/// calls this the "intended end position".
 fn snap_target(
     tree: &RetainedTree,
     container: u64,
     snap: SnapType,
     handle: &ScrollHandle,
     from: Point<Pixels>,
+    at: Point<Pixels>,
     handles: &HashMap<u64, ScrollHandle>,
 ) -> Option<Point<Pixels>> {
     let bounds = crate::automation::get_bounds(container)?;
@@ -501,14 +640,14 @@ fn snap_target(
 
     let x = axis_target(
         &on_x,
-        f32::from(offset.x),
+        f32::from(at.x),
         f32::from(from.x),
         (port_end.x - port_start.x) / 2.0,
         snap.strictness,
     );
     let y = axis_target(
         &on_y,
-        f32::from(offset.y),
+        f32::from(at.y),
         f32::from(from.y),
         (port_end.y - port_start.y) / 2.0,
         snap.strictness,

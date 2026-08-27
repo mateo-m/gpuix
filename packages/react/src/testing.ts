@@ -41,7 +41,8 @@ interface NativeTestRendererApi extends NativeRenderer {
     y: number,
     deltaX: number,
     deltaY: number,
-    modifiers?: string
+    modifiers?: string,
+    phase?: string
   ): void
   simulateMouseMove(
     x: number,
@@ -331,16 +332,18 @@ export class TestRenderer implements NativeRenderer {
   }
 
   /** End-to-end: simulate scroll wheel through GPUI →
-   *  dispatch resulting events to React. */
+   *  dispatch resulting events to React. phase is "started", "moved"
+   *  (the default) or "ended", the touch phase of a trackpad gesture. */
   nativeSimulateScrollWheel(
     x: number,
     y: number,
     deltaX: number,
     deltaY: number,
-    modifiers?: string
+    modifiers?: string,
+    phase?: string
   ): void {
     this.native.flush()
-    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers)
+    this.native.simulateScrollWheel(x, y, deltaX, deltaY, modifiers, phase)
     this.dispatchNativeEvents()
   }
 

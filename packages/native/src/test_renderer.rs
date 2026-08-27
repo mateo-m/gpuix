@@ -577,6 +577,9 @@ impl TestGpuixRenderer {
 
     /// Simulate a scroll wheel event at the given position.
     /// delta_x and delta_y are in pixels (negative = scroll up/left).
+    /// phase is "started", "moved" (the default) or "ended", the touch
+    /// phase of a trackpad gesture. "ended" is the fingers lifting, the
+    /// moment a snap container picks its landing and starts its glide.
     #[napi]
     pub fn simulate_scroll_wheel(
         &self,
@@ -585,8 +588,14 @@ impl TestGpuixRenderer {
         delta_x: f64,
         delta_y: f64,
         modifiers: Option<String>,
+        phase: Option<String>,
     ) -> Result<()> {
         let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let touch_phase = match phase.as_deref().map(str::trim) {
+            Some("started") => gpui::TouchPhase::Started,
+            Some("ended") => gpui::TouchPhase::Ended,
+            _ => gpui::TouchPhase::Moved,
+        };
         with_test_state(|cx, window, _view| {
             cx.simulate_event(
                 window,
@@ -597,7 +606,7 @@ impl TestGpuixRenderer {
                         gpui::px(delta_y as f32),
                     )),
                     modifiers,
-                    touch_phase: gpui::TouchPhase::Moved,
+                    touch_phase,
                 },
             );
             Ok(())
