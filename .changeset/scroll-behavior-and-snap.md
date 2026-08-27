@@ -42,3 +42,13 @@ the current offset paints stronger, and a click on a marker scrolls to its
 area, with a glide when `scroll-behavior: smooth` applies. GPUIX has no
 pseudo-elements, so the markers are round dots rather than
 `::scroll-marker` content.
+
+`scrollIntoView` takes the `container` option from CSSOM View: `"nearest"`
+scrolls only the nearest scroll box, and `"all"`, the default, scrolls
+every ancestor.
+
+`scrollbar-color` now resolves `var()` and the other cascade colours, the
+way every other colour property does.
+
+Snap fires sooner: the idle window is 80ms, and the sub-pixel tail of a
+wheel no longer resets it, so the glide starts while the wheel coasts.

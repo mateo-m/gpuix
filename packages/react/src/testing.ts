@@ -63,7 +63,13 @@ interface NativeTestRendererApi extends NativeRenderer {
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number, behavior?: string): void
   scrollToItem(elementId: number, index: number): void
-  scrollIntoView(elementId: number, block?: string, inline?: string, behavior?: string): void
+  scrollIntoView(
+    elementId: number,
+    block?: string,
+    inline?: string,
+    behavior?: string,
+    container?: string,
+  ): void
   getScrollOffset(elementId: number): number[] | null
   viewTransitionCapture(): void
   viewTransitionStart(options?: string): void
@@ -537,10 +543,17 @@ export class TestRenderer implements NativeRenderer {
    *  scrollIntoView. block places it on the y axis and inline on the x
    *  axis: "start", "center", "end" or "nearest". The defaults match the
    *  web: "start" and "nearest". scrollMargin on the element and
-   *  scrollPadding on a box apply. */
-  scrollIntoView(elementId: number, block?: string, inline?: string, behavior?: string): void {
+   *  scrollPadding on a box apply. container is "all" (the default)
+   *  or "nearest": "nearest" scrolls only the nearest scroll box. */
+  scrollIntoView(
+    elementId: number,
+    block?: string,
+    inline?: string,
+    behavior?: string,
+    container?: string,
+  ): void {
     this.native.flush()
-    this.native.scrollIntoView(elementId, block, inline, behavior)
+    this.native.scrollIntoView(elementId, block, inline, behavior, container)
     this.dispatchNativeEvents()
     this.native.flush()
   }

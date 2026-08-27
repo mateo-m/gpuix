@@ -721,7 +721,8 @@ impl TestGpuixRenderer {
     }
 
     /// Scroll every ancestor scroll box so the element shows, like the
-    /// web scrollIntoView. Call flush() after to apply and re-render.
+    /// web scrollIntoView. `container: "nearest"` scrolls only the
+    /// nearest scroll box. Call flush() after to apply and re-render.
     #[napi]
     pub fn scroll_into_view(
         &self,
@@ -729,18 +730,20 @@ impl TestGpuixRenderer {
         block: Option<String>,
         inline: Option<String>,
         behavior: Option<String>,
+        container: Option<String>,
     ) -> Result<()> {
-        use crate::renderer::scroll_into_view::{scroll_into_view, Align};
+        use crate::renderer::scroll_into_view::{scroll_into_view, Align, Container};
         let id = to_element_id(element_id)?;
         let block = Align::parse(block.as_deref(), Align::Start);
         let inline = Align::parse(inline.as_deref(), Align::Nearest);
         let behavior = crate::renderer::scroll_motion::Behavior::parse(behavior.as_deref());
+        let container = Container::parse(container.as_deref());
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
                 view.update(app, |view, _cx| {
                     let tree = view.tree.lock().unwrap();
-                    scroll_into_view(&tree, id, block, inline, behavior, |id| {
+                    scroll_into_view(&tree, id, block, inline, behavior, container, |id| {
                         view.scroll_handles.get(&id).cloned()
                     });
                 });

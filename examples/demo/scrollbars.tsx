@@ -58,7 +58,10 @@ function Bars() {
         <Sample label={`scrollbarWidth: "none"`} hint="No bar and no gutter. The wheel still scrolls.">
           <ScrollBox style={{ overflowY: "auto", scrollbarWidth: "none" }} />
         </Sample>
-        <Sample label={`scrollbarColor: "…brand …track"`}>
+        <Sample
+          label={`scrollbarColor: "…brand …track"`}
+          hint="Scroll to see it. An overlay bar only paints while the box scrolls."
+        >
           <ScrollBox
             style={{
               overflowY: "auto",
@@ -84,7 +87,7 @@ function Gutters() {
   return (
     <Panel
       title="scrollbar-gutter"
-      note="The content of these boxes fits. With classic bars, stable reserves the gutter anyway, and both-edges adds one more at the start. Overlay bars reserve nothing, so the three boxes then look the same. GPUIX_SCROLLBARS=classic|overlay picks the kind of bar."
+      note="Overlay bars, the macOS default, reserve no gutter, so these three boxes look the same. That matches the web. Start the demo with GPUIX_SCROLLBARS=classic to see the differences: stable reserves the gutter even though the content fits, and both-edges adds one more at the start."
     >
       <Grid>
         <Sample label={`scrollbarGutter: "auto"`}>
@@ -114,18 +117,23 @@ function BothAxes() {
       note="overflow: scroll on both axes. The content is wider and taller than the box, so each axis gets its own bar."
     >
       <div
+        testId="two-axes-box"
         className="rounded border w-full"
         style={{ height: 180, overflow: "scroll", backgroundColor: "var(--color-raised)" }}
       >
         <div
+          testId="two-axes-inner"
           className="col gap-2 p-3"
           style={{
-            width: 900,
+            // The old width of 900 fit inside the box on a wide
+            // window, and then the x axis had nothing to scroll.
+            width: 2000,
             height: 400,
+            flexShrink: 0,
             backgroundImage: "linear-gradient(135deg, var(--color-brand-soft), var(--color-raised))",
           }}
         >
-          <text className="text-xs text-muted">900 x 400 of content in a smaller box.</text>
+          <text className="text-xs text-muted">2000 x 400 of content in a 180px tall box.</text>
         </div>
       </div>
     </Panel>
@@ -137,13 +145,14 @@ export function IntoView() {
   const target = useRef<{ id: number } | null>(null)
   const show = (block: string) => {
     if (renderer && target.current) {
-      renderer.scrollIntoView?.(target.current.id, block)
+      // container: "nearest" keeps the page still while the box scrolls.
+      renderer.scrollIntoView?.(target.current.id, block, undefined, undefined, "nearest")
     }
   }
   return (
     <Panel
       title="scrollIntoView, scroll-margin and scroll-padding"
-      note="The buttons scroll row 10 into view. The box keeps 12px of scroll-padding inside its edges, and the row asks for 16px of scroll-margin around itself, so 28px of space separates the row from the edge."
+      note="The buttons scroll row 10 into view with container: nearest, so only this box moves and the page stays put. The box keeps 12px of scroll-padding inside its edges, and the row asks for 16px of scroll-margin around itself, so 28px of space separates the row from the edge."
     >
       <Row>
         <Button label="start" onClick={() => show("start")} />
@@ -243,7 +252,10 @@ function Smooth() {
     >
       <Row>
         <Button label="top" onClick={() => go(0)} />
-        <Button label="middle" onClick={() => go(-600)} />
+        {/* 30 rows of 22 plus 29 gaps of 8 plus 24 of padding is 916
+            of content. The box shows 150, so the range is 766 and the
+            middle offset is -383, with row 15 near the center. */}
+        <Button label="middle" onClick={() => go(-383)} />
         <Button label="bottom" onClick={() => go(-10000)} />
       </Row>
       <div

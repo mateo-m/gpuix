@@ -72,9 +72,10 @@ export declare class GpuixRenderer {
    * `inline` on the x axis: `start`, `center`, `end` or `nearest`.
    * The defaults match the web: `start` and `nearest`. The
    * `scroll-margin` of the element and the `scroll-padding` of each
-   * box apply.
+   * box apply. `container: "nearest"` scrolls only the nearest scroll
+   * box, like the web option, so the outer view stays put.
    */
-  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null): void
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null, container?: string | undefined | null): void
   /**
    * Clone every element that has a `viewTransitionName`, with its painted
    * bounds. Call this before the React update, then `viewTransitionStart`
@@ -314,9 +315,10 @@ export declare class TestGpuixRenderer {
   scrollTo(elementId: number, x: number, y: number, behavior?: string | undefined | null): void
   /**
    * Scroll every ancestor scroll box so the element shows, like the
-   * web scrollIntoView. Call flush() after to apply and re-render.
+   * web scrollIntoView. `container: "nearest"` scrolls only the
+   * nearest scroll box. Call flush() after to apply and re-render.
    */
-  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null): void
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null, container?: string | undefined | null): void
   /**
    * Clone every element that has a `viewTransitionName`, with its painted
    * bounds. Call flush() first, so the bounds are current.

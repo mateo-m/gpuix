@@ -527,8 +527,10 @@ pub(crate) fn build_div(
             // which taffy takes as one width for both axes. A frozen view
             // transition copy gets none: see `BuildCtx::frozen`.
             let mode = super::scrollbar::Mode::current(cx);
+            let scope = ctx.cascade.scope();
+            let color = |word: &str| scope.color(word).map(crate::color::to_hsla);
             if let Some(spec) =
-                super::scrollbar::Spec::from_style(style, mode).filter(|_| !ctx.frozen)
+                super::scrollbar::Spec::from_style(style, mode, &color).filter(|_| !ctx.frozen)
             {
                 let state = ctx.scrollbars.entry(element.id).or_default().clone();
                 let reserved = spec.reserved(state.borrow().overflowed);
