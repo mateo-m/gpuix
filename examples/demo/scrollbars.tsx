@@ -195,7 +195,9 @@ export function IntoView() {
 /// A carousel that rests centered on a card. The container declares the
 /// snap axis, each card declares where it lands.
 function Snap() {
-  const colors = ["#7c6cff", "#22c55e", "#e11d48", "#f59e0b", "#06b6d4", "#a855f7"]
+  const palette = ["#7c6cff", "#22c55e", "#e11d48", "#f59e0b", "#06b6d4", "#a855f7"]
+  // Enough cards for a long fling to cross many snap positions.
+  const colors = Array.from({ length: 30 }, (_, i) => palette[i % palette.length])
   return (
     <Panel
       title="scroll-snap-type, scroll-snap-align and scroll-marker-group"
