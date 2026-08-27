@@ -11,9 +11,14 @@
 //! the same style channel that `motion` uses, and the frozen copy carries its
 //! opacity on a wrapper element.
 //!
+//! A name that disappears without a successor becomes an exit copy: the
+//! renderer paints its frozen copy over the whole tree at its captured
+//! place, and the group's `old` side drives it.
+//!
 //! Known limits, on purpose:
-//! - A name that disappears without a successor paints nothing. Give both
-//!   screens one name to animate an exit as a pair.
+//! - An exit copy paints over the tree, so a former ancestor's clip or
+//!   scroll no longer applies to it. Give both screens one name when the
+//!   exit must stay inside the element's own area.
 //! - When the named element survives the swap, its frozen copy takes fresh
 //!   ids, so the copy paints without the old scroll offsets.
 //! - The frozen copy keeps its event listeners, but their elements are gone
@@ -97,6 +102,8 @@ struct SideSpec {
     translate_x: Option<[VtLen; 2]>,
     translate_y: Option<[VtLen; 2]>,
     opacity: Option<[f64; 2]>,
+    /// A `filter: blur()` sigma in pixels, as a `[from, to]` pair.
+    blur: Option<[f64; 2]>,
     /// Paint this side over the other one. Only read on the old side.
     on_top: Option<bool>,
 }
@@ -407,6 +414,20 @@ impl VtElementFrame {
             .map(|[from, to]| motion::mix(from, to, self.t))
     }
 
+    /// The live element's blur sigma this frame, or `None` when it holds
+    /// still.
+    pub(crate) fn new_blur(&self) -> Option<f64> {
+        self.new
+            .blur
+            .map(|[from, to]| motion::mix(from, to, self.t).max(0.0))
+    }
+
+    fn old_blur(&self) -> Option<f64> {
+        self.old
+            .blur
+            .map(|[from, to]| motion::mix(from, to, self.t).max(0.0))
+    }
+
     fn offset(x: Option<[VtLen; 2]>, y: Option<[VtLen; 2]>, t: f64, extent: Size<Pixels>) -> Point<Pixels> {
         let resolve = |lens: Option<[VtLen; 2]>, extent: f32| {
             lens.map_or(0.0, |[from, to]| {
@@ -453,42 +474,11 @@ pub(super) fn wrap(
         .and_then(|style| style.view_transition_name.as_deref())
         .unwrap_or_default();
     let vt = ctx.vt;
-    let old = vt.and_then(|vt| vt.capture(name)).map(|capture| {
-        // The frozen tree builds through the same walk as the live one. The
-        // nested context clears `vt`, so a name inside the copy never starts
-        // a transition of its own.
-        let mut frozen_ctx = BuildCtx {
-            tree: &capture.tree,
-            event_callback: ctx.event_callback,
-            focus_handles: ctx.focus_handles,
-            scroll_handles: &mut *ctx.scroll_handles,
-            custom_registry: &mut *ctx.custom_registry,
-            virtual_lists: &mut *ctx.virtual_lists,
-            motion_states: &mut *ctx.motion_states,
-            scrollbars: &mut *ctx.scrollbars,
-            now: ctx.now,
-            motion_active: &mut *ctx.motion_active,
-            selection: ctx.selection.clone(),
-            cascade: ctx.cascade.clone(),
-            highlight: None,
-            highlights: &mut *ctx.highlights,
-            highlight_events: &mut *ctx.highlight_events,
-            vt: None,
-        };
-        let content = build_element(capture.root, &mut frozen_ctx, window, cx);
-        // The shell fixes the copy at its captured size and carries this
-        // frame's opacity down the whole copy.
-        let mut shell = gpui::div()
-            .w(capture.size.width)
-            .h(capture.size.height)
-            .overflow_hidden();
-        shell.style().opacity = Some(frame.old_opacity() as f32);
-        OldCopy {
-            element: shell.child(content).into_any_element(),
-            layout: IsolatedLayout::new(),
-            origin: capture.origin + frame.old_offset(capture.size),
-            size: capture.size,
-        }
+    let old = vt.and_then(|vt| vt.capture(name)).map(|capture| OldCopy {
+        element: build_frozen(capture, &frame, ctx, window, cx),
+        layout: IsolatedLayout::new(),
+        origin: capture.origin + frame.old_offset(capture.size),
+        size: capture.size,
     });
     VtGroup {
         child: built,
@@ -496,6 +486,101 @@ pub(super) fn wrap(
         frame,
     }
     .into_any_element()
+}
+
+/// Build the frozen copy of one capture, held at its captured size and faded
+/// and blurred for this frame.
+fn build_frozen(
+    capture: &VtCapture,
+    frame: &VtElementFrame,
+    ctx: &mut BuildCtx,
+    window: &mut Window,
+    cx: &mut gpui::Context<super::GpuixView>,
+) -> AnyElement {
+    use gpui::prelude::*;
+
+    // The frozen tree builds through the same walk as the live one. The
+    // nested context clears `vt`, so a name inside the copy never starts
+    // a transition of its own.
+    let mut frozen_ctx = BuildCtx {
+        tree: &capture.tree,
+        event_callback: ctx.event_callback,
+        focus_handles: ctx.focus_handles,
+        scroll_handles: &mut *ctx.scroll_handles,
+        custom_registry: &mut *ctx.custom_registry,
+        virtual_lists: &mut *ctx.virtual_lists,
+        motion_states: &mut *ctx.motion_states,
+        scrollbars: &mut *ctx.scrollbars,
+        now: ctx.now,
+        motion_active: &mut *ctx.motion_active,
+        selection: ctx.selection.clone(),
+        cascade: ctx.cascade.clone(),
+        highlight: None,
+        highlights: &mut *ctx.highlights,
+        highlight_events: &mut *ctx.highlight_events,
+        vt: None,
+        frozen: true,
+    };
+    let content = build_element(capture.root, &mut frozen_ctx, window, cx);
+    // The shell fixes the copy at its captured size and carries this
+    // frame's opacity down the whole copy.
+    let mut shell = gpui::div()
+        .w(capture.size.width)
+        .h(capture.size.height)
+        .overflow_hidden();
+    shell.style().opacity = Some(frame.old_opacity() as f32);
+    if let Some(blur) = frame.old_blur() {
+        shell = shell.blur(px(blur as f32));
+    }
+    shell.child(content).into_any_element()
+}
+
+/// Build a frozen copy for every captured name that has no live element this
+/// frame. The renderer appends these to the root wrapper, so they paint over
+/// the tree at their captured place while the group's `old` side fades or
+/// moves them out.
+pub(super) fn exit_copies(
+    ctx: &mut BuildCtx,
+    window: &mut Window,
+    cx: &mut gpui::Context<super::GpuixView>,
+) -> Vec<AnyElement> {
+    use gpui::prelude::*;
+
+    let Some(vt) = ctx.vt else {
+        return Vec::new();
+    };
+    let live: HashSet<&str> = ctx
+        .tree
+        .elements
+        .values()
+        .filter_map(|element| element.style.as_deref()?.view_transition_name.as_deref())
+        .collect();
+    // Sorted, so two exit copies paint in the same order on every frame.
+    let mut names: Vec<&String> = vt
+        .captures
+        .keys()
+        .filter(|name| !live.contains(name.as_str()))
+        .collect();
+    names.sort();
+    let mut copies = Vec::new();
+    for name in names {
+        let Some(capture) = vt.capture(name) else {
+            continue;
+        };
+        let Some(frame) = vt.frame_for(name) else {
+            continue;
+        };
+        copies.push(
+            ExitCopy {
+                element: build_frozen(capture, &frame, ctx, window, cx),
+                layout: IsolatedLayout::new(),
+                origin: capture.origin + frame.old_offset(capture.size),
+                size: capture.size,
+            }
+            .into_any_element(),
+        );
+    }
+    copies
 }
 
 /// The frozen copy of one name, ready to paint at its captured place.
@@ -609,5 +694,128 @@ impl IntoElement for VtGroup {
 
     fn into_element(self) -> Self {
         self
+    }
+}
+
+/// One exit-only frozen copy, painted over the tree at its captured place.
+///
+/// The element asks for no layout space of its own. The copy lays out in its
+/// own isolated tree at its captured size, so the live layout never sees it.
+struct ExitCopy {
+    element: AnyElement,
+    layout: IsolatedLayout,
+    origin: Point<Pixels>,
+    size: Size<Pixels>,
+}
+
+impl Element for ExitCopy {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (
+            window.request_layout(gpui::Style::default(), None::<LayoutId>, cx),
+            (),
+        )
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let element = &mut self.element;
+        let origin = self.origin;
+        let extent = self.size;
+        self.layout.enter(window, |window| {
+            element.layout_as_root(
+                size(
+                    AvailableSpace::Definite(extent.width),
+                    AvailableSpace::Definite(extent.height),
+                ),
+                window,
+                cx,
+            );
+            element.prepaint_at(origin, window, cx);
+        });
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        _prepaint: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let element = &mut self.element;
+        self.layout.enter(window, |window| element.paint(window, cx));
+    }
+}
+
+impl IntoElement for ExitCopy {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+
+    /// A state with no captures, halted at `elapsed_ms` into the transition.
+    fn state_at(options: &str, elapsed_ms: u64) -> VtState {
+        let options = VtOptions::parse(options).unwrap();
+        let started = Instant::now();
+        VtState {
+            captures: HashMap::new(),
+            options,
+            started: Some(started),
+            frame_now: Some(started + Duration::from_millis(elapsed_ms)),
+            ids: HashSet::new(),
+        }
+    }
+
+    #[test]
+    fn blur_mixes_on_both_sides() {
+        let state = state_at(
+            r#"{"groups":{"screen":{"duration":0.3,"ease":"linear","old":{"blur":[0,6]},"new":{"blur":[6,0],"opacity":[0,1]}}}}"#,
+            150,
+        );
+        let frame = state.frame_for("screen").unwrap();
+        assert_eq!(frame.new_blur(), Some(3.0));
+        assert_eq!(frame.old_blur(), Some(3.0));
+        assert_eq!(frame.new_opacity(), Some(0.5));
+    }
+
+    #[test]
+    fn a_side_without_blur_holds_still() {
+        let state = state_at(r#"{"groups":{"screen":{"old":{"opacity":[1,0]}}}}"#, 150);
+        let frame = state.frame_for("screen").unwrap();
+        assert_eq!(frame.new_blur(), None);
+        assert_eq!(frame.old_blur(), None);
     }
 }

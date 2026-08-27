@@ -15,6 +15,8 @@ pub(crate) struct MotionStyle {
     pub width: Option<f64>,
     pub height: Option<MotionHeight>,
     pub opacity: Option<f64>,
+    /// A `filter: blur()` sigma in pixels, on the element and its children.
+    pub blur: Option<f64>,
     pub top: Option<f64>,
     pub right: Option<f64>,
     pub bottom: Option<f64>,
@@ -198,6 +200,7 @@ impl MotionStyle {
                 .height
                 .map(|to| self.height.unwrap_or(to).mix(to, progress)),
             opacity: value(self.opacity, target.opacity, progress),
+            blur: value(self.blur, target.blur, progress),
             top: value(self.top, target.top, progress),
             right: value(self.right, target.right, progress),
             bottom: value(self.bottom, target.bottom, progress),
@@ -220,6 +223,9 @@ impl MotionStyle {
         }
         if let Some(value) = self.opacity {
             style.opacity = Some(value.into());
+        }
+        if let Some(value) = self.blur {
+            style.filter = Some(format!("blur({value}px)"));
         }
         if let Some(value) = self.top {
             style.top = Some(value.into());
@@ -331,12 +337,13 @@ impl MotionFrame {
     }
 
     /// A frame a view transition composes for the arriving element of a pair.
-    /// It carries only the opacity of this animation frame. The transition
-    /// element applies the movement at paint.
-    pub(crate) fn view_transition_opacity(opacity: f64) -> Self {
+    /// It carries the opacity and the blur of this animation frame. The
+    /// transition element applies the movement at paint.
+    pub(crate) fn view_transition_frame(opacity: Option<f64>, blur: Option<f64>) -> Self {
         Self {
             style: MotionStyle {
-                opacity: Some(opacity),
+                opacity,
+                blur,
                 ..MotionStyle::default()
             },
             active: true,
@@ -345,10 +352,19 @@ impl MotionFrame {
         }
     }
 
-    /// Fold a view-transition opacity into this frame. The transition owns the
-    /// element while it runs, so its opacity replaces the motion one.
-    pub(crate) fn with_view_transition_opacity(mut self, opacity: f64) -> Self {
-        self.style.opacity = Some(opacity);
+    /// Fold a view transition into this frame. The transition owns the
+    /// element while it runs, so its values replace the motion ones.
+    pub(crate) fn with_view_transition(
+        mut self,
+        opacity: Option<f64>,
+        blur: Option<f64>,
+    ) -> Self {
+        if opacity.is_some() {
+            self.style.opacity = opacity;
+        }
+        if blur.is_some() {
+            self.style.blur = blur;
+        }
         self.active = true;
         self
     }
@@ -523,6 +539,7 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
         ("width", style.width),
         ("height", style.height.map(|height| height.pixels)),
         ("opacity", style.opacity),
+        ("blur", style.blur),
         ("top", style.top),
         ("right", style.right),
         ("bottom", style.bottom),
@@ -536,8 +553,9 @@ fn validate_style(style: &MotionStyle) -> Result<(), String> {
     if style.width.is_some_and(|value| value < 0.0)
         || style.height.is_some_and(|height| height.pixels < 0.0)
         || style.border_radius.is_some_and(|value| value < 0.0)
+        || style.blur.is_some_and(|value| value < 0.0)
     {
-        return Err("motion sizes and borderRadius must be non-negative".to_string());
+        return Err("motion sizes, borderRadius and blur must be non-negative".to_string());
     }
     if style
         .opacity
@@ -685,6 +703,25 @@ mod tests {
                 .width,
             Some(25.0)
         );
+    }
+
+    #[test]
+    fn blur_interpolates_and_folds_into_the_filter() {
+        let started = Instant::now();
+        let spec = serde_json::json!({
+            "initial": { "blur": 0.0 },
+            "animate": { "blur": 8.0 },
+            "transition": { "duration": 1.0, "ease": "linear" }
+        });
+        let state = MotionState::new(&spec, started).unwrap();
+        let frame = state.frame(started + Duration::from_millis(500));
+        assert_eq!(frame.style.blur, Some(4.0));
+        let mut style = StyleDesc::default();
+        frame.style.apply_to(&mut style);
+        assert_eq!(style.filter.as_deref(), Some("blur(4px)"));
+
+        let bad = serde_json::json!({ "animate": { "blur": -1.0 }, "transition": {} });
+        assert!(MotionState::new(&bad, started).is_err());
     }
 
     #[test]
