@@ -26,6 +26,8 @@ export interface MotionStyle {
    */
   height?: number | "auto"
   opacity?: Numeric
+  /** A `filter: blur()` sigma in pixels, on the element and its children. */
+  blur?: Numeric
   top?: Numeric
   right?: Numeric
   bottom?: Numeric
