@@ -13,8 +13,7 @@
 /// move.
 
 import React, { useEffect, useState } from "react"
-import type { NativeRenderer } from "@gpuix/react"
-import { VirtualList } from "@gpuix/react"
+import type { EventPayload, NativeRenderer } from "@gpuix/react"
 import { Button, Panel, Row } from "./ui.js"
 
 /// The part of a renderer this panel reads. The overlay methods are optional
@@ -127,40 +126,56 @@ function Frames({ renderer }: { renderer: FrameOverlay }) {
 }
 
 const ROWS = 5000
+/// Rows built around the visible range, so a scroll never waits for React.
+const OVERDRAW_ROWS = 12
 
+/// Windowing is the app's job: the list reports the visible range, and this
+/// component renders that slice plus an overdraw. `windowStart` tells the
+/// native list which logical index the first child is.
 function Rows() {
+  const [range, setRange] = useState({ start: 0, end: 30 })
+  const start = Math.max(0, range.start - OVERDRAW_ROWS)
+  const end = Math.min(ROWS, range.end + OVERDRAW_ROWS)
   return (
     <Panel
       title="A long list"
       note="Five thousand rows, of which only the ones near the viewport are built. Scroll it."
     >
       <div style={{ height: 260, borderRadius: 10, borderWidth: 1, borderColor: "var(--color-line)" }}>
-        <VirtualList
+        <virtual-list
           itemCount={ROWS}
           estimatedItemHeight={34}
+          windowStart={start}
           style={{ width: "100%", height: 260 }}
-          renderItem={(index) => (
-            <div
-              key={index}
-              className="row items-center gap-3 px-3"
-              style={{
-                height: 34,
-                backgroundColor:
-                  index % 2 === 0 ? "var(--color-panel)" : "var(--color-raised)",
-              }}
-            >
-              <text className="mono text-xs text-faint">{String(index).padStart(4, "0")}</text>
+          onVisibleRange={(event: EventPayload) => {
+            setRange({ start: event.startIndex ?? 0, end: event.endIndex ?? 30 })
+          }}
+        >
+          {Array.from({ length: end - start }, (_, offset) => {
+            const index = start + offset
+            return (
               <div
+                key={index}
+                className="row items-center gap-3 px-3"
                 style={{
-                  width: 60 + (index % 7) * 30,
-                  height: 8,
-                  borderRadius: 4,
-                  backgroundColor: `oklch(0.7 0.13 ${(index * 11) % 360})`,
+                  height: 34,
+                  backgroundColor:
+                    index % 2 === 0 ? "var(--color-panel)" : "var(--color-raised)",
                 }}
-              />
-            </div>
-          )}
-        />
+              >
+                <text className="mono text-xs text-faint">{String(index).padStart(4, "0")}</text>
+                <div
+                  style={{
+                    width: 60 + (index % 7) * 30,
+                    height: 8,
+                    borderRadius: 4,
+                    backgroundColor: `oklch(0.7 0.13 ${(index * 11) % 360})`,
+                  }}
+                />
+              </div>
+            )
+          })}
+        </virtual-list>
       </div>
     </Panel>
   )
