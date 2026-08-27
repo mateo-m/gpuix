@@ -500,12 +500,38 @@ style_desc! {
     scroll_margin_right: Option<Numeric> = "scrollMarginRight",
     scroll_margin_bottom: Option<Numeric> = "scrollMarginBottom",
     scroll_margin_left: Option<Numeric> = "scrollMarginLeft",
+    /// The logical sides. GPUIX lays text out horizontally, left to
+    /// right, so block is vertical and inline is horizontal.
+    scroll_margin_block: Option<Numeric> = "scrollMarginBlock",
+    scroll_margin_block_start: Option<Numeric> = "scrollMarginBlockStart",
+    scroll_margin_block_end: Option<Numeric> = "scrollMarginBlockEnd",
+    scroll_margin_inline: Option<Numeric> = "scrollMarginInline",
+    scroll_margin_inline_start: Option<Numeric> = "scrollMarginInlineStart",
+    scroll_margin_inline_end: Option<Numeric> = "scrollMarginInlineEnd",
     /// Space `scrollIntoView` keeps inside this scroll box.
     scroll_padding: Option<Numeric> = "scrollPadding",
     scroll_padding_top: Option<Numeric> = "scrollPaddingTop",
     scroll_padding_right: Option<Numeric> = "scrollPaddingRight",
     scroll_padding_bottom: Option<Numeric> = "scrollPaddingBottom",
     scroll_padding_left: Option<Numeric> = "scrollPaddingLeft",
+    scroll_padding_block: Option<Numeric> = "scrollPaddingBlock",
+    scroll_padding_block_start: Option<Numeric> = "scrollPaddingBlockStart",
+    scroll_padding_block_end: Option<Numeric> = "scrollPaddingBlockEnd",
+    scroll_padding_inline: Option<Numeric> = "scrollPaddingInline",
+    scroll_padding_inline_start: Option<Numeric> = "scrollPaddingInlineStart",
+    scroll_padding_inline_end: Option<Numeric> = "scrollPaddingInlineEnd",
+    /// `auto` moves a programmatic scroll in one step. `smooth` animates it.
+    scroll_behavior: Option<String> = "scrollBehavior",
+    /// `none`, or an axis (`x`, `y`, `both`, `inline`, `block`) with an
+    /// optional strictness (`mandatory` or `proximity`).
+    scroll_snap_type: Option<String> = "scrollSnapType",
+    /// `none`, `start`, `center` or `end`. One word for both axes, or the
+    /// block word then the inline word.
+    scroll_snap_align: Option<String> = "scrollSnapAlign",
+    /// `normal`, or `always` to stop a long scroll at this element.
+    scroll_snap_stop: Option<String> = "scrollSnapStop",
+    /// `none`, or `nearest` to scroll this element into view when it mounts.
+    scroll_initial_target: Option<String> = "scrollInitialTarget",
 
     // View transitions. The name pairs the element that leaves with the
     // element that arrives across one `startViewTransition` call.

@@ -183,6 +183,83 @@ export function IntoView() {
   )
 }
 
+/// A carousel that rests centered on a card. The container declares the
+/// snap axis, each card declares where it lands.
+function Snap() {
+  const colors = ["#7c6cff", "#22c55e", "#e11d48", "#f59e0b", "#06b6d4", "#a855f7"]
+  return (
+    <Panel
+      title="scroll-snap-type and scroll-snap-align"
+      note="Scroll the carousel and let go. When the scroll rests, the box glides to the nearest card and centers it. The third card sets scroll-snap-stop: always, so a long scroll cannot pass over it."
+    >
+      <div
+        className="row rounded border w-full"
+        style={{
+          height: 150,
+          overflowX: "auto",
+          scrollSnapType: "x mandatory",
+          backgroundColor: "var(--color-raised)",
+        }}
+      >
+        {colors.map((color, i) => (
+          <div
+            key={i}
+            className="col items-center justify-center rounded"
+            style={{
+              width: 200,
+              height: 110,
+              margin: 12,
+              flexShrink: 0,
+              scrollSnapAlign: "center",
+              scrollSnapStop: i === 2 ? "always" : undefined,
+              backgroundColor: color,
+            }}
+          >
+            <text className="text-sm font-semibold" style={{ color: "#ffffff" }}>
+              {i === 2 ? `card ${i + 1}, stop: always` : `card ${i + 1}`}
+            </text>
+          </div>
+        ))}
+      </div>
+    </Panel>
+  )
+}
+
+/// Programmatic scrolls glide when the box asks for scroll-behavior: smooth.
+function Smooth() {
+  const { renderer } = useGpuix()
+  const box = useRef<{ id: number } | null>(null)
+  const go = (y: number) => {
+    if (renderer && box.current) {
+      renderer.scrollTo?.(box.current.id, 0, y)
+    }
+  }
+  return (
+    <Panel
+      title="scroll-behavior: smooth"
+      note="The buttons set the scroll offset. The box declares scroll-behavior: smooth, so the offset glides instead of jumping, and a wheel move cancels the glide."
+    >
+      <Row>
+        <Button label="top" onClick={() => go(0)} />
+        <Button label="middle" onClick={() => go(-600)} />
+        <Button label="bottom" onClick={() => go(-10000)} />
+      </Row>
+      <div
+        ref={box}
+        className="col rounded border w-full"
+        style={{
+          height: 150,
+          overflowY: "auto",
+          scrollBehavior: "smooth",
+          backgroundColor: "var(--color-raised)",
+        }}
+      >
+        <Rows count={30} />
+      </div>
+    </Panel>
+  )
+}
+
 export function Scrollbars() {
   return (
     <>
@@ -190,6 +267,8 @@ export function Scrollbars() {
       <Gutters />
       <BothAxes />
       <IntoView />
+      <Snap />
+      <Smooth />
     </>
   )
 }

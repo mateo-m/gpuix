@@ -74,7 +74,7 @@ export declare class GpuixRenderer {
    * `scroll-margin` of the element and the `scroll-padding` of each
    * box apply.
    */
-  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null): void
   /**
    * Clone every element that has a `viewTransitionName`, with its painted
    * bounds. Call this before the React update, then `viewTransitionStart`
@@ -103,8 +103,10 @@ export declare class GpuixRenderer {
   /**
    * Set the scroll offset of a scrollable element.
    * x and y are negative pixel values (scroll down = more negative y).
+   * `behavior` is `auto`, `instant` or `smooth`, like the web `scrollTo`
+   * option. `auto` reads the `scroll-behavior` of the box.
    */
-  scrollTo(elementId: number, x: number, y: number): void
+  scrollTo(elementId: number, x: number, y: number, behavior?: string | undefined | null): void
   /** Scroll a child into view by its index in the children list. */
   scrollToItem(elementId: number, index: number): void
   /**
@@ -309,12 +311,12 @@ export declare class TestGpuixRenderer {
    * x and y are negative pixel values (scroll down = more negative y).
    * Call flush() after to apply the offset and re-render.
    */
-  scrollTo(elementId: number, x: number, y: number): void
+  scrollTo(elementId: number, x: number, y: number, behavior?: string | undefined | null): void
   /**
    * Scroll every ancestor scroll box so the element shows, like the
    * web scrollIntoView. Call flush() after to apply and re-render.
    */
-  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
+  scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null, behavior?: string | undefined | null): void
   /**
    * Clone every element that has a `viewTransitionName`, with its painted
    * bounds. Call flush() first, so the bounds are current.
