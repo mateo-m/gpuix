@@ -263,8 +263,11 @@ export declare class TestGpuixRenderer {
   /**
    * Simulate a scroll wheel event at the given position.
    * delta_x and delta_y are in pixels (negative = scroll up/left).
+   * phase is "started", "moved" (the default) or "ended", the touch
+   * phase of a trackpad gesture. "ended" is the fingers lifting, the
+   * moment a snap container picks its landing and starts its glide.
    */
-  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null): void
+  simulateScrollWheel(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null, phase?: string | undefined | null): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
   /** Drop the current selection. */

@@ -124,6 +124,60 @@ describeNative("scroll snap", () => {
     expect(offsetY(id)).toBe(-100)
   })
 
+  /** A trackpad gesture: fingers down, pulls of `delta` 8ms apart, lift. */
+  const fling = (id: number, pulls: number, delta: number) => {
+    const [x, y] = root.renderer.getElementBounds(id)!
+    const at = { x: x + 100, y: y + 100 }
+    root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, 0, undefined, "started")
+    for (let i = 0; i < pulls; i++) {
+      root.renderer.clockFastForward(8)
+      root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, delta, undefined, "moved")
+    }
+    root.renderer.clockFastForward(8)
+    root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, 0, undefined, "ended")
+    return at
+  }
+
+  /** Let the glide the lift started take its start time and land. */
+  const glide = () => {
+    root.renderer.flush()
+    root.renderer.clockFastForward(400)
+    root.renderer.flush()
+    root.renderer.flush()
+  }
+
+  it("a fling snaps at the lift, to the predicted landing", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    // Four pulls of 40px in 32ms is 5000px/s: the momentum would run
+    // far past the end, so the glide goes straight to the last row.
+    fling(id, 4, -40)
+    glide()
+    expect(offsetY(id)).toBe(-400)
+  })
+
+  it("the momentum after the lift cannot cancel the glide", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    // A gentler fling: 20px in 32ms lands near -330, so row 3 at -300.
+    const at = fling(id, 4, -5)
+    root.renderer.flush()
+    // The OS momentum stream after the lift. Consumed, so it cannot
+    // move the box off the glide.
+    for (let i = 0; i < 3; i++) {
+      root.renderer.clockFastForward(16)
+      root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, -30, undefined, "moved")
+    }
+    glide()
+    expect(offsetY(id)).toBe(-300)
+  })
+
   it("the sub-pixel tail of a scroll does not delay the snap", () => {
     const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
     root.render(<Box style={{ scrollSnapType: "y mandatory" }} rows={rows} />)

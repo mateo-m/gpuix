@@ -523,6 +523,36 @@ pub(crate) fn build_div(
                 .clone();
             el = el.track_scroll(&handle);
 
+            // Snap a fling the moment the fingers lift, the way a browser
+            // does. The capture handler sees the wheel before the box
+            // scrolls. On the lift it predicts the landing point, glides
+            // to the snap position picked for it, and then consumes the
+            // OS momentum stream so it cannot cancel the glide.
+            if style.scroll_snap_type.is_some() && !ctx.frozen {
+                let view = cx.weak_entity();
+                let id = element.id;
+                let snap_handle = handle.clone();
+                el = el.capture_scroll_wheel(move |event, window, cx| {
+                    let Some(view) = view.upgrade() else { return };
+                    let delta = event.delta.pixel_delta(window.line_height());
+                    let consume = view.update(cx, |view, _cx| {
+                        let tree = view.tree.lock().unwrap();
+                        super::scroll_motion::gesture_wheel(
+                            &tree,
+                            &view.scroll_handles,
+                            id,
+                            &snap_handle,
+                            delta,
+                            event.touch_phase,
+                            view.clock.now(),
+                        )
+                    });
+                    if consume {
+                        cx.stop_propagation();
+                    }
+                });
+            }
+
             // The scrollbar. Classic bars reserve a gutter in the layout,
             // which taffy takes as one width for both axes. A frozen view
             // transition copy gets none: see `BuildCtx::frozen`.

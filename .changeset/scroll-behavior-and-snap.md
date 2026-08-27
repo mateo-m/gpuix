@@ -52,3 +52,10 @@ way every other colour property does.
 
 Snap fires sooner: the idle window is 80ms, and the sub-pixel tail of a
 wheel no longer resets it, so the glide starts while the wheel coasts.
+
+A trackpad fling snaps the moment the fingers lift, as a browser does.
+The box predicts the landing point from the last 100ms of wheel deltas,
+picks the snap position for that landing, and glides straight to it. The
+OS momentum stream after the lift cannot cancel the glide, because the
+box consumes it. A mouse wheel has no touch phases, so it keeps the 80ms
+idle watcher.
