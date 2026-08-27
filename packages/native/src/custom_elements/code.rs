@@ -288,7 +288,7 @@ pub(crate) fn wire_standard_events(
     {
         el = el.relative();
     }
-    el = el.child(crate::automation::bounds_tracker(ctx.id, None));
+    el = el.child(crate::automation::bounds_tracker(ctx.id, None, None));
 
     let id = ctx.id;
     for event in ctx.events {
