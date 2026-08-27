@@ -3,9 +3,10 @@
 /// The header stays mounted the whole time, and only its content takes part
 /// in the transition. The back button enters and leaves through a blur and
 /// opacity pair. The title of each screen carries the name "nav-title", so
-/// the old title slides and blurs out while the new one slides and blurs in.
-/// The screens slide under the header as a pair, and a backdrop blur with an
-/// eased mask blurs the rows progressively where they pass under it.
+/// the old text blurs and fades out in place while the new text sharpens in,
+/// a text morph. The screens slide under the header as a pair, and a
+/// backdrop blur with an eased mask blurs the rows progressively where they
+/// pass under it.
 
 import React, { useState } from "react"
 import { startViewTransition, useGpuix } from "@gpuix/react"
@@ -26,8 +27,8 @@ const PUSH: ViewTransitionOptions = {
     },
     "nav-back": { new: { opacity: [0, 1], blur: [6, 0] } },
     "nav-title": {
-      old: { opacity: [1, 0], translateX: ["0%", "-40%"], blur: [0, 4] },
-      new: { opacity: [0, 1], translateX: ["40%", "0%"], blur: [4, 0] },
+      old: { opacity: [1, 0], blur: [0, 4] },
+      new: { opacity: [0, 1], blur: [4, 0] },
     },
   },
 }
@@ -42,8 +43,8 @@ const POP: ViewTransitionOptions = {
     },
     "nav-back": { old: { opacity: [1, 0], blur: [0, 6] } },
     "nav-title": {
-      old: { opacity: [1, 0], translateX: ["0%", "40%"], blur: [0, 4] },
-      new: { opacity: [0, 1], translateX: ["-40%", "0%"], blur: [4, 0] },
+      old: { opacity: [1, 0], blur: [0, 4] },
+      new: { opacity: [0, 1], blur: [4, 0] },
     },
   },
 }
@@ -115,8 +116,6 @@ function Header({ screen, onBack }: {
           right: 0,
           height: HEADER_HEIGHT,
           justifyContent: "center",
-          borderBottomWidth: 1,
-          borderColor: "var(--color-line)",
           pointerEvents: "none",
         }}
       >
