@@ -66,3 +66,10 @@ picks the snap position for that landing, and glides straight to it. The
 OS momentum stream after the lift cannot cancel the glide, because the
 box consumes it. A mouse wheel has no touch phases, so it keeps the 80ms
 idle watcher.
+
+The fling glide moves along Chromium's snap fling curve
+(`cc/input/snap_fling_curve.cc`): each 16ms frame covers 0.92 of what
+the frame before it covered, so the glide starts fast and slows down
+like momentum, and a longer distance takes more time. A new touch on
+the box stops a running glide at once. Programmatic smooth scrolls keep
+the 300ms `easeInOut` glide.
