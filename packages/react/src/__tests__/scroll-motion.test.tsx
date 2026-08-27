@@ -179,6 +179,36 @@ describeNative("scroll snap", () => {
     expect(offsetY(id)).toBe(-300)
   })
 
+  it("the box does not snap while the fingers stay on the pad", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    const [x, y] = root.renderer.getElementBounds(id)!
+    const at = { x: x + 100, y: y + 100 }
+    root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, 0, undefined, "started")
+    for (let i = 0; i < 4; i++) {
+      root.renderer.clockFastForward(8)
+      root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, -5, undefined, "moved")
+    }
+    root.renderer.flush()
+    // The fingers rest on the pad, far past the idle window. The web
+    // never snaps during the drag, so the box must hold at -20. The
+    // second wait gives a wrongly started glide the time to land.
+    root.renderer.clockFastForward(300)
+    root.renderer.flush()
+    root.renderer.clockFastForward(400)
+    root.renderer.flush()
+    root.renderer.flush()
+    expect(offsetY(id)).toBe(-20)
+    // The lift after the rest has zero velocity, so the box snaps to
+    // the nearest position, row 1 at 0.
+    root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, 0, undefined, "ended")
+    glide()
+    expect(offsetY(id)).toBe(0)
+  })
+
   it("the momentum tail after the glide lands cannot move the box", () => {
     const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
     root.render(
