@@ -105,7 +105,10 @@ function Header({ screen, onBack }: {
           right: 0,
           height: HEADER_HEIGHT + BLUR_TAIL,
           backdropFilter: "blur(16px)",
-          maskImage: "linear-gradient(to bottom, black 50%, ease-in-out, transparent)",
+          // The fade starts high, so the blur is weak where the first row
+          // rests. A fade from the middle kept the blur near 75% strength
+          // there, and the hover colour of the row smeared up into the bar.
+          maskImage: "linear-gradient(to bottom, black 25%, ease-in-out, transparent)",
           pointerEvents: "none",
         }}
       />
