@@ -20,6 +20,7 @@ import { Inheritance } from "./demo/inheritance"
 import { Lengths } from "./demo/lengths"
 import { motion } from "@gpuix/react"
 import { Motion } from "./demo/motion-panel"
+import { IntoView, Scrollbars } from "./demo/scrollbars"
 import { Variables } from "./demo/variables"
 import { resolveClassName } from "./demo/classes"
 
@@ -40,6 +41,7 @@ const PANELS = [
   ["inheritance", <Inheritance />],
   ["classes", <ClassNames />],
   ["motion", <Motion />],
+  ["scrollbars", <Scrollbars />],
 ] as const
 
 describeNative("demo panels", () => {
@@ -205,6 +207,41 @@ describeNative("height: auto", () => {
   })
 })
 
+describeNative("the scrollbars panel", () => {
+  it("scrollIntoView honours scroll-padding and scroll-margin", () => {
+    const test = root()
+    test.render(
+      <div
+        style={{
+          ...BASE,
+          ...PALETTES.midnight,
+          width: "100%",
+          height: "100%",
+          padding: 16,
+          backgroundColor: "var(--color-bg)",
+        }}
+      >
+        <IntoView />
+      </div>
+    )
+    const box = test.renderer.findByTestId("into-view-box")!
+    expect(test.renderer.getScrollOffset(box.id)![1]).toBe(0)
+
+    const start = test.renderer.findByText("start")!
+    const [x, y] = test.renderer.getElementBounds(start.id)!
+    test.renderer.nativeSimulateClick(x + 4, y + 4)
+
+    expect(test.renderer.getScrollOffset(box.id)![1]).toBeLessThan(0)
+    const [, boxY] = test.renderer.getElementBounds(box.id)!
+    const row = test.renderer.findByTestId("into-view-target")!
+    const [, rowY] = test.renderer.getElementBounds(row.id)!
+    // 12px of scroll-padding plus 16px of scroll-margin, inside the border.
+    expect(rowY - boxY).toBeGreaterThanOrEqual(28)
+    expect(rowY - boxY).toBeLessThanOrEqual(30)
+    test.unmount()
+  })
+})
+
 describeNative("the whole application", () => {
   /// Walk the sidebar and paint each section, so the whole application is
   /// covered rather than the one it opens on. The test renderer has the frame
@@ -214,7 +251,7 @@ describeNative("the whole application", () => {
     test.render(<App />)
     expect(test.renderer.getPaintedText()).toContain("GPUIX")
 
-    for (const title of ["Lengths", "Variables", "Inheritance", "className", "Motion", "Performance", "Colours"]) {
+    for (const title of ["Lengths", "Variables", "Inheritance", "className", "Motion", "Scrollbars", "Performance", "Colours"]) {
       const item = test.renderer.findByText(title)
       expect(item, `no sidebar item named ${title}`).toBeDefined()
       const bounds = test.renderer.getElementBounds(item!.id)
