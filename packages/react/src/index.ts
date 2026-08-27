@@ -9,6 +9,13 @@ export {
   startFrameLoop,
 } from "./reconciler/renderer.js"
 export { GpuixContext, useGpuix, useGpuixRequired } from "./hooks/use-gpuix.js"
+export { startViewTransition } from "./view-transitions.js"
+export type {
+  ViewTransitionGroupOptions,
+  ViewTransitionLength,
+  ViewTransitionOptions,
+  ViewTransitionSide,
+} from "./view-transitions.js"
 export { useWindowInsets, useWindowSize } from "./hooks/use-window-size.js"
 export { findRanges, useTextSearch } from "./hooks/use-text-search.js"
 export type {

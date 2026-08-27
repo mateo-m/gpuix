@@ -16,6 +16,7 @@ import { Effects } from "./effects.js"
 import { Inheritance } from "./inheritance.js"
 import { Lengths } from "./lengths.js"
 import { Motion } from "./motion-panel.js"
+import { Navigation } from "./navigation.js"
 import { frameOverlay, Perf } from "./perf.js"
 import { Scrollbars } from "./scrollbars.js"
 import { Variables } from "./variables.js"
@@ -78,6 +79,7 @@ const SECTIONS = [
   { id: "classes", title: "className", render: () => <ClassNames /> },
   { id: "motion", title: "Motion", render: () => <Motion /> },
   { id: "scrollbars", title: "Scrollbars", render: () => <Scrollbars /> },
+  { id: "navigation", title: "Navigation", render: () => <Navigation /> },
 ] as const
 
 type SectionId = (typeof SECTIONS)[number]["id"] | "perf"

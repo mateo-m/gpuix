@@ -738,6 +738,36 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Clone every element that has a `viewTransitionName`, with its painted
+    /// bounds. Call flush() first, so the bounds are current.
+    #[napi]
+    pub fn view_transition_capture(&self) -> Result<()> {
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, _window, app| {
+                view.update(app, |view, _cx| view.view_transition_capture());
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(())
+        })
+    }
+
+    /// Animate every captured name toward its new element. Call flush()
+    /// after, and move the automation clock to step through the frames.
+    #[napi]
+    pub fn view_transition_start(&self, options: Option<String>) -> Result<()> {
+        let options = options.unwrap_or_else(|| "{}".to_string());
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| view.view_transition_start(&options))
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            result.map_err(Error::from_reason)
+        })
+    }
+
     /// Scroll a child into view by its index in the children list.
     /// Call flush() after to apply and re-render.
     #[napi]

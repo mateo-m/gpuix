@@ -305,6 +305,9 @@ export interface StyleDesc {
   scrollPaddingRight?: Numeric
   scrollPaddingBottom?: Numeric
   scrollPaddingLeft?: Numeric
+  /** The name that pairs this element across a `startViewTransition` call:
+   *  the old element with this name animates into the new one. */
+  viewTransitionName?: string
   /** `auto`, `contain` or `none`, one word for both axes or two with the x
    *  axis first. A scroll box keeps a wheel event it can scroll with. At its
    *  end, `auto` hands the event to the nearest scroll box around it and
@@ -783,6 +786,15 @@ export interface NativeRenderer {
   scrollIntoView?(elementId: number, block?: string, inline?: string): void
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset?(elementId: number): Array<number> | null
+
+  // ── View transitions ───────────────────────────────────────────
+  /** Clone every element that has a `viewTransitionName`, with its painted
+   *  bounds. Call before the update, then `viewTransitionStart` after it.
+   *  `startViewTransition` does both. */
+  viewTransitionCapture?(): void
+  /** Animate every captured name toward its new element. `options` is the
+   *  JSON of a `ViewTransitionOptions` value, or nothing for a crossfade. */
+  viewTransitionStart?(options?: string): void
 
   // ── Selection API ──────────────────────────────────────────────
   /** The current text selection joined in document order, or null. */

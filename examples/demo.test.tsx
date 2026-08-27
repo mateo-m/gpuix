@@ -20,6 +20,7 @@ import { Inheritance } from "./demo/inheritance"
 import { Lengths } from "./demo/lengths"
 import { motion } from "@gpuix/react"
 import { Motion } from "./demo/motion-panel"
+import { Navigation } from "./demo/navigation"
 import { IntoView, Scrollbars } from "./demo/scrollbars"
 import { Variables } from "./demo/variables"
 import { resolveClassName } from "./demo/classes"
@@ -42,6 +43,7 @@ const PANELS = [
   ["classes", <ClassNames />],
   ["motion", <Motion />],
   ["scrollbars", <Scrollbars />],
+  ["navigation", <Navigation />],
 ] as const
 
 describeNative("demo panels", () => {
@@ -242,6 +244,50 @@ describeNative("the scrollbars panel", () => {
   })
 })
 
+describeNative("the navigation panel", () => {
+  it("pushes the General screen from the right and pops it back", () => {
+    const test = root()
+    test.render(
+      <div
+        style={{
+          ...BASE,
+          ...PALETTES.midnight,
+          width: "100%",
+          height: "100%",
+          padding: 16,
+          backgroundColor: "var(--color-bg)",
+        }}
+      >
+        <Navigation />
+      </div>
+    )
+    test.renderer.clockPause()
+
+    const general = test.renderer.findByTestId("nav-row-General")!
+    const [gx, gy] = test.renderer.getElementBounds(general.id)!
+    test.renderer.nativeSimulateClick(gx + 4, gy + 4)
+
+    // At the start of the push, the General screen sits one screen width to
+    // the right of where it will rest. The phone is 320 wide with a 1px
+    // border on each side, so the screen is 318.
+    const about = test.renderer.findByText("About")!
+    const startX = test.renderer.getElementBounds(about.id)![0]
+    test.renderer.clockFastForward(600)
+    const endX = test.renderer.getElementBounds(about.id)![0]
+    expect(startX - endX).toBeCloseTo(318, 0)
+
+    const back = test.renderer.findByTestId("nav-back")!
+    const [bx, by] = test.renderer.getElementBounds(back.id)!
+    test.renderer.nativeSimulateClick(bx + 4, by + 4)
+    test.renderer.clockFastForward(600)
+    expect(test.renderer.findByTestId("nav-row-General")).toBeDefined()
+    expect(test.renderer.findByText("About")).toBeUndefined()
+
+    test.renderer.clockResume()
+    test.unmount()
+  })
+})
+
 describeNative("the whole application", () => {
   /// Walk the sidebar and paint each section, so the whole application is
   /// covered rather than the one it opens on. The test renderer has the frame
@@ -251,7 +297,7 @@ describeNative("the whole application", () => {
     test.render(<App />)
     expect(test.renderer.getPaintedText()).toContain("GPUIX")
 
-    for (const title of ["Lengths", "Variables", "Inheritance", "className", "Motion", "Scrollbars", "Performance", "Colours"]) {
+    for (const title of ["Lengths", "Variables", "Inheritance", "className", "Motion", "Scrollbars", "Navigation", "Performance", "Colours"]) {
       const item = test.renderer.findByText(title)
       expect(item, `no sidebar item named ${title}`).toBeDefined()
       const bounds = test.renderer.getElementBounds(item!.id)

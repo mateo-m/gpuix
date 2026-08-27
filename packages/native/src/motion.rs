@@ -180,7 +180,7 @@ impl MotionHeight {
 }
 
 /// One step of a linear interpolation.
-fn mix(from: f64, to: f64, progress: f64) -> f64 {
+pub(crate) fn mix(from: f64, to: f64, progress: f64) -> f64 {
     from + (to - from) * progress
 }
 
@@ -251,7 +251,7 @@ enum MotionInitial {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 #[serde(untagged)]
-enum MotionEase {
+pub(crate) enum MotionEase {
     Name(String),
     CubicBezier([f64; 4]),
 }
@@ -328,6 +328,29 @@ impl MotionFrame {
     /// takes. `AutoHeight` measures that, so the style sink leaves it alone.
     pub(crate) fn measured_height(&self) -> Option<MotionHeight> {
         self.style.height.filter(|height| height.needs_content())
+    }
+
+    /// A frame a view transition composes for the arriving element of a pair.
+    /// It carries only the opacity of this animation frame. The transition
+    /// element applies the movement at paint.
+    pub(crate) fn view_transition_opacity(opacity: f64) -> Self {
+        Self {
+            style: MotionStyle {
+                opacity: Some(opacity),
+                ..MotionStyle::default()
+            },
+            active: true,
+            content: None,
+            measured: ContentHeight::default(),
+        }
+    }
+
+    /// Fold a view-transition opacity into this frame. The transition owns the
+    /// element while it runs, so its opacity replaces the motion one.
+    pub(crate) fn with_view_transition_opacity(mut self, opacity: f64) -> Self {
+        self.style.opacity = Some(opacity);
+        self.active = true;
+        self
     }
 }
 
@@ -534,7 +557,7 @@ fn validate_seconds(value: f64, name: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_ease(ease: &MotionEase) -> Result<(), String> {
+pub(crate) fn validate_ease(ease: &MotionEase) -> Result<(), String> {
     match ease {
         MotionEase::Name(name)
             if matches!(
@@ -561,7 +584,7 @@ fn seconds(value: f64) -> Duration {
     Duration::try_from_secs_f64(value).expect("motion durations are validated when parsed")
 }
 
-fn ease(progress: f64, ease: &MotionEase) -> f64 {
+pub(crate) fn ease(progress: f64, ease: &MotionEase) -> f64 {
     let curve = match ease {
         MotionEase::CubicBezier(curve) => *curve,
         MotionEase::Name(name) => match name.as_str() {

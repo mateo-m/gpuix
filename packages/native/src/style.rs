@@ -507,6 +507,10 @@ style_desc! {
     scroll_padding_bottom: Option<Numeric> = "scrollPaddingBottom",
     scroll_padding_left: Option<Numeric> = "scrollPaddingLeft",
 
+    // View transitions. The name pairs the element that leaves with the
+    // element that arrives across one `startViewTransition` call.
+    view_transition_name: Option<String> = "viewTransitionName",
+
     // Cursor
     cursor: Option<String> = "cursor",
     /// `"auto"` blocks mouse hits behind this element. `"none"` never does.
