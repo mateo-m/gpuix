@@ -520,6 +520,7 @@ pub(crate) fn build_div(
     el = el.child(crate::automation::bounds_tracker(
         element.id,
         selection_start_flag(style),
+        ctx.scroll_handles.get(&element.id).cloned(),
     ));
 
     if let Some(handle) = ctx.focus_handles.get(&element.id) {
@@ -830,7 +831,7 @@ pub(crate) fn build_text(
         let content = element.content.clone().unwrap_or_default();
         return gpui::div()
             .relative()
-            .child(crate::automation::bounds_tracker(element.id, None))
+            .child(crate::automation::bounds_tracker(element.id, None, None))
             .child(text_content(element, &content, ctx))
             .into_any_element();
     }
@@ -851,6 +852,7 @@ pub(crate) fn build_text(
     el = el.child(crate::automation::bounds_tracker(
         element.id,
         selection_start_flag(style),
+        None,
     ));
 
     if let Some(ref content) = element.content {

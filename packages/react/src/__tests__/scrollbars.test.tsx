@@ -145,6 +145,18 @@ describeNative("scrollIntoView", () => {
     expect(root.renderer.getScrollOffset(divs[0]!.id)![1]).toBe(-226)
   })
 
+  it("a repeated call moves nothing", () => {
+    // The box's own recorded bounds must not move with its own offset.
+    // When they do, the second call applies the same delta again.
+    root.render(<List />)
+    const divs = root.renderer.findByType("div")
+    root.renderer.scrollIntoView(divs[7]!.id)
+    const once = root.renderer.getScrollOffset(divs[0]!.id)![1]
+    expect(once).toBeLessThan(0)
+    root.renderer.scrollIntoView(divs[7]!.id)
+    expect(root.renderer.getScrollOffset(divs[0]!.id)![1]).toBe(once)
+  })
+
   it("nearest leaves a visible target alone", () => {
     root.render(<List />)
     const divs = root.renderer.findByType("div")
