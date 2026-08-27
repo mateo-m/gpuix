@@ -138,10 +138,11 @@ describeNative("scroll snap", () => {
     return at
   }
 
-  /** Let the glide the lift started take its start time and land. */
+  /** Let the glide the lift started take its start time and land. The
+   *  fling curve runs about 0.6s over these distances. */
   const glide = () => {
     root.renderer.flush()
-    root.renderer.clockFastForward(400)
+    root.renderer.clockFastForward(700)
     root.renderer.flush()
     root.renderer.flush()
   }
@@ -175,6 +176,28 @@ describeNative("scroll snap", () => {
       root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, -30, undefined, "moved")
     }
     glide()
+    expect(offsetY(id)).toBe(-300)
+  })
+
+  it("the fling glide decays like momentum, not like a fixed ease", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    fling(id, 4, -5)
+    root.renderer.flush()
+    // Chromium's curve takes 39 frames of 16ms for the 280px that are
+    // left, so at 320ms the box still moves. The old fixed 300ms ease
+    // had already landed.
+    root.renderer.clockFastForward(320)
+    root.renderer.flush()
+    const mid = offsetY(id)
+    expect(mid).toBeLessThan(-200)
+    expect(mid).toBeGreaterThan(-295)
+    root.renderer.clockFastForward(400)
+    root.renderer.flush()
+    root.renderer.flush()
     expect(offsetY(id)).toBe(-300)
   })
 

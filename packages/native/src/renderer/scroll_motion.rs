@@ -72,10 +72,26 @@ impl Behavior {
     }
 }
 
+/// How a glide moves from its start to its end.
+enum Curve {
+    /// A programmatic smooth scroll: `easeInOut` over `SMOOTH_SECONDS`.
+    Smooth,
+    /// The end of a fling, from Chromium's `cc/input/snap_fling_curve.cc`:
+    /// each 16ms frame moves `FLING_RATIO` of what the frame before it
+    /// moved, and the first delta makes the series sum to the whole
+    /// distance. It starts fast and slows, the way momentum does, and it
+    /// takes longer over a longer distance.
+    Fling {
+        /// The frame count that ends the series, from the distance.
+        frames: f64,
+    },
+}
+
 /// One running scroll animation.
 struct Animation {
     from: Point<Pixels>,
     to: Point<Pixels>,
+    curve: Curve,
     /// Set on the first step, so a paused test clock drives it.
     started: Option<Instant>,
     /// The offset the last step wrote. The box sitting anywhere else means
@@ -115,6 +131,13 @@ struct Gesture {
 const MOMENTUM_SECONDS: f32 = 0.5;
 /// Samples older than this play no part in the lift velocity.
 const VELOCITY_WINDOW_SECONDS: f64 = 0.1;
+/// The decay of the fling curve: each frame moves this share of what the
+/// frame before it moved. Chromium uses 0.92 on desktop.
+const FLING_RATIO: f64 = 0.92;
+/// The frame length the fling curve counts in, as Chromium does.
+const FLING_FRAME_SECONDS: f64 = 0.016;
+/// No fling glide runs longer than this, whatever the distance says.
+const FLING_MAX_SECONDS: f64 = 3.0;
 
 thread_local! {
     static ANIMATIONS: RefCell<HashMap<u64, Animation>> = RefCell::new(HashMap::new());
@@ -143,6 +166,10 @@ pub(crate) fn gesture_wheel(
         let mut gestures = cell.borrow_mut();
         match phase {
             TouchPhase::Started => {
+                // The fingers caught the box. A running glide stops at
+                // once, the way Chromium clears its snap fling on a
+                // gesture begin.
+                ANIMATIONS.with(|cell| cell.borrow_mut().remove(&id));
                 gestures.insert(
                     id,
                     Gesture {
@@ -192,7 +219,7 @@ pub(crate) fn gesture_wheel(
                     snap_target(tree, id, snap, handle, gesture.from, landing, handles)
                 {
                     if target != handle.offset() {
-                        animate(id, handle, target);
+                        animate_fling(id, handle, target);
                         gesture.coasting = true;
                     }
                 }
@@ -234,6 +261,25 @@ fn predicted_landing(
 /// first, so the glide re-targets rather than queues. The target clamps
 /// to the scrollable range, so a glide never runs past the end.
 pub(crate) fn animate(id: u64, handle: &ScrollHandle, to: Point<Pixels>) {
+    insert_animation(id, handle, to, Curve::Smooth);
+}
+
+/// Glide the box to `to` the way a fling ends: fast at first and slowing
+/// down. The frame count comes from Chromium's estimate: the deltas form
+/// a geometric series with ratio `FLING_RATIO` whose last term is one
+/// pixel, so `distance = (1 - ratio^-frames) / (1 - 1 / ratio)`, solved
+/// for `frames`.
+fn animate_fling(id: u64, handle: &ScrollHandle, to: Point<Pixels>) {
+    let from = handle.offset();
+    let distance = (f32::from(to.x - from.x) as f64).hypot(f32::from(to.y - from.y) as f64);
+    let frames = (-(1.0 - distance * (1.0 - 1.0 / FLING_RATIO)).ln() / FLING_RATIO.ln())
+        .ceil()
+        .min(FLING_MAX_SECONDS / FLING_FRAME_SECONDS)
+        .max(1.0);
+    insert_animation(id, handle, to, Curve::Fling { frames });
+}
+
+fn insert_animation(id: u64, handle: &ScrollHandle, to: Point<Pixels>, curve: Curve) {
     let max = handle.max_offset();
     let to = point(
         to.x.max(-max.x).min(px(0.0)),
@@ -246,6 +292,7 @@ pub(crate) fn animate(id: u64, handle: &ScrollHandle, to: Point<Pixels>) {
             Animation {
                 from,
                 to,
+                curve,
                 started: None,
                 written: from,
             },
@@ -299,12 +346,27 @@ fn step_animations(handles: &HashMap<u64, ScrollHandle>, now: Instant) -> bool {
                 return false;
             }
             let started = *animation.started.get_or_insert(now);
-            let raw = (now - started).as_secs_f64() / SMOOTH_SECONDS;
-            if raw >= 1.0 {
-                handle.set_offset(animation.to);
-                return false;
-            }
-            let t = ease(raw.max(0.0), &smooth_ease());
+            let elapsed = (now - started).as_secs_f64();
+            let t = match animation.curve {
+                Curve::Smooth => {
+                    let raw = elapsed / SMOOTH_SECONDS;
+                    if raw >= 1.0 {
+                        handle.set_offset(animation.to);
+                        return false;
+                    }
+                    ease(raw.max(0.0), &smooth_ease())
+                }
+                Curve::Fling { frames } => {
+                    // The sum of the series up to this frame, over the sum
+                    // of the whole series, as in `GetCurrentCurveDistance`.
+                    let frame = elapsed / FLING_FRAME_SECONDS + 1.0;
+                    if frame >= frames {
+                        handle.set_offset(animation.to);
+                        return false;
+                    }
+                    (1.0 - FLING_RATIO.powf(frame)) / (1.0 - FLING_RATIO.powf(frames))
+                }
+            };
             let at = point(
                 px(mix(f32::from(animation.from.x) as f64, f32::from(animation.to.x) as f64, t) as f32),
                 px(mix(f32::from(animation.from.y) as f64, f32::from(animation.to.y) as f64, t) as f32),
