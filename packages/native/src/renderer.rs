@@ -49,6 +49,7 @@ mod auto_height;
 mod batch;
 mod frame;
 pub(crate) mod scroll_into_view;
+pub(crate) mod scroll_motion;
 pub(crate) mod scrollbar;
 pub(crate) mod view_transition;
 mod virtual_list;
@@ -282,6 +283,7 @@ enum UiCommand {
         id: u64,
         x: f32,
         y: f32,
+        behavior: scroll_motion::Behavior,
     },
     ScrollToItem {
         id: u64,
@@ -291,6 +293,7 @@ enum UiCommand {
         id: u64,
         block: scroll_into_view::Align,
         inline: scroll_into_view::Align,
+        behavior: scroll_motion::Behavior,
     },
     ViewTransitionCapture,
     ViewTransitionStart {
@@ -388,7 +391,7 @@ async fn run_ui_commands(
             UiCommand::ResetDebugFrameOverlayStats => window.update(cx, |_view, window, _cx| {
                 window.reset_debug_frame_overlay_stats();
             }),
-            UiCommand::ScrollTo { id, x, y } => {
+            UiCommand::ScrollTo { id, x, y, behavior } => {
                 if !VIRTUAL_LIST_STATES.with(|cell| {
                     let states = cell.borrow();
                     let Some(state) = states.get(&id) else {
@@ -397,11 +400,11 @@ async fn run_ui_commands(
                     state.set_offset_from_scrollbar(gpui::point(gpui::px(x), gpui::px(y)));
                     true
                 }) {
-                    SCROLL_HANDLES.with(|cell| {
-                        if let Some(handle) = cell.borrow().get(&id) {
-                            handle.set_offset(gpui::point(gpui::px(x), gpui::px(y)));
-                        }
-                    });
+                    window
+                        .update(cx, |view, _window, _cx| {
+                            view.scroll_to_offset(id, x, y, behavior);
+                        })
+                        .ok();
                 }
                 refresh_ui_window(window, cx)
             }
@@ -425,11 +428,16 @@ async fn run_ui_commands(
                 }
                 refresh_ui_window(window, cx)
             }
-            UiCommand::ScrollIntoView { id, block, inline } => {
+            UiCommand::ScrollIntoView {
+                id,
+                block,
+                inline,
+                behavior,
+            } => {
                 window
                     .update(cx, |view, _window, _cx| {
                         let tree = view.tree.lock().unwrap();
-                        scroll_into_view::scroll_into_view(&tree, id, block, inline, |id| {
+                        scroll_into_view::scroll_into_view(&tree, id, block, inline, behavior, |id| {
                             SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
                         });
                     })
@@ -1252,15 +1260,17 @@ impl GpuixRenderer {
         element_id: f64,
         block: Option<String>,
         inline: Option<String>,
+        behavior: Option<String>,
     ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let block = scroll_into_view::Align::parse(block.as_deref(), scroll_into_view::Align::Start);
         let inline =
             scroll_into_view::Align::parse(inline.as_deref(), scroll_into_view::Align::Nearest);
+        let behavior = scroll_motion::Behavior::parse(behavior.as_deref());
         #[cfg(target_os = "macos")]
         {
             let tree = self.tree.lock().unwrap();
-            scroll_into_view::scroll_into_view(&tree, id, block, inline, |id| {
+            scroll_into_view::scroll_into_view(&tree, id, block, inline, behavior, |id| {
                 SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
             });
             drop(tree);
@@ -1268,7 +1278,12 @@ impl GpuixRenderer {
         }
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollIntoView { id, block, inline });
+        return self.send_ui_command(UiCommand::ScrollIntoView {
+            id,
+            block,
+            inline,
+            behavior,
+        });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1513,9 +1528,12 @@ impl GpuixRenderer {
 
     /// Set the scroll offset of a scrollable element.
     /// x and y are negative pixel values (scroll down = more negative y).
+    /// `behavior` is `auto`, `instant` or `smooth`, like the web `scrollTo`
+    /// option. `auto` reads the `scroll-behavior` of the box.
     #[napi]
-    pub fn scroll_to(&self, element_id: f64, x: f64, y: f64) -> Result<()> {
+    pub fn scroll_to(&self, element_id: f64, x: f64, y: f64, behavior: Option<String>) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let behavior = scroll_motion::Behavior::parse(behavior.as_deref());
         #[cfg(target_os = "macos")]
         if !VIRTUAL_LIST_STATES.with(|cell| {
             let states = cell.borrow();
@@ -1525,10 +1543,19 @@ impl GpuixRenderer {
             state.set_offset_from_scrollbar(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
             true
         }) {
+            let smooth = {
+                let tree = self.tree.lock().unwrap();
+                behavior.smooth(tree.elements.get(&id).and_then(|el| el.style.as_deref()))
+            };
             SCROLL_HANDLES.with(|cell| {
                 let handles = cell.borrow();
                 if let Some(handle) = handles.get(&id) {
-                    handle.set_offset(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
+                    let to = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+                    if smooth {
+                        scroll_motion::animate(id, handle, to);
+                    } else {
+                        handle.set_offset(to);
+                    }
                 }
             });
         }
@@ -1540,6 +1567,7 @@ impl GpuixRenderer {
             id,
             x: x as f32,
             y: y as f32,
+            behavior,
         });
 
         #[cfg(not(any(
@@ -2867,6 +2895,33 @@ impl GpuixView {
         Ok(())
     }
 
+    /// Set one scroll offset, in one step or as a glide when the box asks
+    /// for `scroll-behavior: smooth` or the caller asks for `smooth`.
+    /// Only the UI-command thread calls this, so macOS builds without it.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    pub(crate) fn scroll_to_offset(
+        &self,
+        id: u64,
+        x: f32,
+        y: f32,
+        behavior: scroll_motion::Behavior,
+    ) {
+        let smooth = {
+            let tree = self.tree.lock().unwrap();
+            behavior.smooth(tree.elements.get(&id).and_then(|el| el.style.as_deref()))
+        };
+        SCROLL_HANDLES.with(|cell| {
+            if let Some(handle) = cell.borrow().get(&id) {
+                let to = gpui::point(gpui::px(x), gpui::px(y));
+                if smooth {
+                    scroll_motion::animate(id, handle, to);
+                } else {
+                    handle.set_offset(to);
+                }
+            }
+        });
+    }
+
     /// The root cascade for `theme`, reusing the last one while the theme
     /// holds still.
     fn root_cascade(&self, theme: &Theme, rem_size: gpui::Pixels) -> crate::inheritance::Inherited {
@@ -3202,6 +3257,11 @@ impl gpui::Render for GpuixView {
         let theme = Theme::dark();
         let root_cascade = self.root_cascade(&theme, window.rem_size());
         let mut motion_active = false;
+        // Smooth scrolls, snap containers and initial targets step once per
+        // frame, against the bounds the last frame painted.
+        if scroll_motion::frame(&tree, &self.scroll_handles, now) {
+            motion_active = true;
+        }
         // Pruned by DECLARATION, not existence: an element that drops its
         // `highlight` prop keeps living, and its cached group list holds a copy
         // of every string in its subtree.

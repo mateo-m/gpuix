@@ -61,9 +61,9 @@ interface NativeTestRendererApi extends NativeRenderer {
   getRootId(): number | null
   getWindowSize(): { width: number; height: number }
   getAllText(): string[]
-  scrollTo(elementId: number, x: number, y: number): void
+  scrollTo(elementId: number, x: number, y: number, behavior?: string): void
   scrollToItem(elementId: number, index: number): void
-  scrollIntoView(elementId: number, block?: string, inline?: string): void
+  scrollIntoView(elementId: number, block?: string, inline?: string, behavior?: string): void
   getScrollOffset(elementId: number): number[] | null
   viewTransitionCapture(): void
   viewTransitionStart(options?: string): void
@@ -518,9 +518,9 @@ export class TestRenderer implements NativeRenderer {
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
    *  x and y are negative pixel values (scroll down = more negative y).
    *  Call flush() internally to apply. */
-  scrollTo(elementId: number, x: number, y: number): void {
+  scrollTo(elementId: number, x: number, y: number, behavior?: string): void {
     this.native.flush()
-    this.native.scrollTo(elementId, x, y)
+    this.native.scrollTo(elementId, x, y, behavior)
     // Flush again to re-render with the new offset
     this.native.flush()
   }
@@ -538,9 +538,9 @@ export class TestRenderer implements NativeRenderer {
    *  axis: "start", "center", "end" or "nearest". The defaults match the
    *  web: "start" and "nearest". scrollMargin on the element and
    *  scrollPadding on a box apply. */
-  scrollIntoView(elementId: number, block?: string, inline?: string): void {
+  scrollIntoView(elementId: number, block?: string, inline?: string, behavior?: string): void {
     this.native.flush()
-    this.native.scrollIntoView(elementId, block, inline)
+    this.native.scrollIntoView(elementId, block, inline, behavior)
     this.dispatchNativeEvents()
     this.native.flush()
   }

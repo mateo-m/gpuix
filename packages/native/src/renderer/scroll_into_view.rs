@@ -78,41 +78,70 @@ fn shorthand(value: Option<&Numeric>) -> [f32; 4] {
     }
 }
 
-/// A per-side value over the shorthand.
-fn side(long: Option<&Numeric>, short: f32) -> f32 {
-    match long {
-        None => short,
-        Some(Numeric::Number(number)) => *number as f32,
-        Some(Numeric::Text(text)) => length(text),
+/// One declared length, or `None` when the property is not set.
+fn declared(value: Option<&Numeric>) -> Option<f32> {
+    match value {
+        None => None,
+        Some(Numeric::Number(number)) => Some(*number as f32),
+        Some(Numeric::Text(text)) => Some(length(text)),
     }
 }
 
+/// The one-or-two shorthand of a logical pair, as start and end.
+fn pair(value: Option<&Numeric>) -> [Option<f32>; 2] {
+    let words: Vec<f32> = match value {
+        None => return [None; 2],
+        Some(Numeric::Number(number)) => return [Some(*number as f32); 2],
+        Some(Numeric::Text(text)) => text.split_whitespace().map(length).collect(),
+    };
+    match words[..] {
+        [both] => [Some(both); 2],
+        [start, end] => [Some(start), Some(end)],
+        _ => [None; 2],
+    }
+}
+
+/// One side: the physical longhand first, then the logical longhand, then
+/// the logical shorthand, then the physical shorthand. GPUIX lays text out
+/// horizontally, left to right, so block is vertical and inline is
+/// horizontal.
+fn side(physical: Option<&Numeric>, logical: Option<&Numeric>, of_pair: Option<f32>, short: f32) -> f32 {
+    declared(physical)
+        .or_else(|| declared(logical))
+        .or(of_pair)
+        .unwrap_or(short)
+}
+
 /// The `scroll-margin` of the element, as top, right, bottom and left.
-fn scroll_margin(style: Option<&StyleDesc>) -> [f32; 4] {
+pub(crate) fn scroll_margin(style: Option<&StyleDesc>) -> [f32; 4] {
     let Some(style) = style else { return [0.0; 4] };
     let base = shorthand(style.scroll_margin.as_ref());
+    let block = pair(style.scroll_margin_block.as_ref());
+    let inline = pair(style.scroll_margin_inline.as_ref());
     [
-        side(style.scroll_margin_top.as_ref(), base[0]),
-        side(style.scroll_margin_right.as_ref(), base[1]),
-        side(style.scroll_margin_bottom.as_ref(), base[2]),
-        side(style.scroll_margin_left.as_ref(), base[3]),
+        side(style.scroll_margin_top.as_ref(), style.scroll_margin_block_start.as_ref(), block[0], base[0]),
+        side(style.scroll_margin_right.as_ref(), style.scroll_margin_inline_end.as_ref(), inline[1], base[1]),
+        side(style.scroll_margin_bottom.as_ref(), style.scroll_margin_block_end.as_ref(), block[1], base[2]),
+        side(style.scroll_margin_left.as_ref(), style.scroll_margin_inline_start.as_ref(), inline[0], base[3]),
     ]
 }
 
 /// The `scroll-padding` of a scroll box, in the same order.
-fn scroll_padding(style: Option<&StyleDesc>) -> [f32; 4] {
+pub(crate) fn scroll_padding(style: Option<&StyleDesc>) -> [f32; 4] {
     let Some(style) = style else { return [0.0; 4] };
     let base = shorthand(style.scroll_padding.as_ref());
+    let block = pair(style.scroll_padding_block.as_ref());
+    let inline = pair(style.scroll_padding_inline.as_ref());
     [
-        side(style.scroll_padding_top.as_ref(), base[0]),
-        side(style.scroll_padding_right.as_ref(), base[1]),
-        side(style.scroll_padding_bottom.as_ref(), base[2]),
-        side(style.scroll_padding_left.as_ref(), base[3]),
+        side(style.scroll_padding_top.as_ref(), style.scroll_padding_block_start.as_ref(), block[0], base[0]),
+        side(style.scroll_padding_right.as_ref(), style.scroll_padding_inline_end.as_ref(), inline[1], base[1]),
+        side(style.scroll_padding_bottom.as_ref(), style.scroll_padding_block_end.as_ref(), block[1], base[2]),
+        side(style.scroll_padding_left.as_ref(), style.scroll_padding_inline_start.as_ref(), inline[0], base[3]),
     ]
 }
 
 /// How far the content must move on one axis, in pixels.
-fn axis_delta(align: Align, start: f32, end: f32, port_start: f32, port_end: f32) -> f32 {
+pub(crate) fn axis_delta(align: Align, start: f32, end: f32, port_start: f32, port_end: f32) -> f32 {
     match align {
         Align::Start => start - port_start,
         Align::End => end - port_end,
@@ -136,6 +165,7 @@ pub(crate) fn scroll_into_view(
     target: u64,
     block: Align,
     inline: Align,
+    behavior: super::scroll_motion::Behavior,
     handle_for: impl Fn(u64) -> Option<ScrollHandle>,
 ) -> bool {
     let Some(bounds) = crate::automation::get_bounds(target) else {
@@ -171,7 +201,11 @@ pub(crate) fn scroll_into_view(
                 (old.y - px(delta.y)).max(-max.y).min(px(0.0)),
             );
             if new != old {
-                handle.set_offset(new);
+                if behavior.smooth(style(id)) {
+                    super::scroll_motion::animate(id, &handle, new);
+                } else {
+                    handle.set_offset(new);
+                }
                 moved = true;
             }
             // The content of the box moves with the offset, and the

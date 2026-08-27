@@ -299,12 +299,42 @@ export interface StyleDesc {
   scrollMarginRight?: Numeric
   scrollMarginBottom?: Numeric
   scrollMarginLeft?: Numeric
+  /** The logical sides. GPUIX lays text out horizontally, left to right,
+   *  so block is vertical and inline is horizontal. */
+  scrollMarginBlock?: Numeric
+  scrollMarginBlockStart?: Numeric
+  scrollMarginBlockEnd?: Numeric
+  scrollMarginInline?: Numeric
+  scrollMarginInlineStart?: Numeric
+  scrollMarginInlineEnd?: Numeric
   /** Space scrollIntoView keeps inside this scroll box. */
   scrollPadding?: Numeric
   scrollPaddingTop?: Numeric
   scrollPaddingRight?: Numeric
   scrollPaddingBottom?: Numeric
   scrollPaddingLeft?: Numeric
+  scrollPaddingBlock?: Numeric
+  scrollPaddingBlockStart?: Numeric
+  scrollPaddingBlockEnd?: Numeric
+  scrollPaddingInline?: Numeric
+  scrollPaddingInlineStart?: Numeric
+  scrollPaddingInlineEnd?: Numeric
+  /** `auto` moves a programmatic scroll in one step. `smooth` glides it,
+   *  and a wheel move cancels the glide. */
+  scrollBehavior?: string
+  /** `none`, or an axis (`x`, `y`, `both`, `inline`, `block`) with an
+   *  optional strictness. `mandatory` always snaps when the scroll rests.
+   *  `proximity`, the default, snaps within half a viewport. */
+  scrollSnapType?: string
+  /** `none`, `start`, `center` or `end`. One word for both axes, or the
+   *  block word then the inline word. */
+  scrollSnapAlign?: string
+  /** `normal`, or `always` to stop a long scroll at this element instead
+   *  of passing over it. */
+  scrollSnapStop?: string
+  /** `none`, or `nearest` to scroll this element into view once, when it
+   *  first paints. */
+  scrollInitialTarget?: string
   /** The name that pairs this element across a `startViewTransition` call:
    *  the old element with this name animates into the new one. */
   viewTransitionName?: string
@@ -775,15 +805,17 @@ export interface NativeRenderer {
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
-   *  x and y are negative pixel values (scroll down = more negative y). */
-  scrollTo?(elementId: number, x: number, y: number): void
+   *  x and y are negative pixel values (scroll down = more negative y).
+   *  behavior is "auto", "instant" or "smooth", like the web scrollTo
+   *  option. "auto", the default, reads the scroll-behavior of the box. */
+  scrollTo?(elementId: number, x: number, y: number, behavior?: string): void
   /** Scroll a child into view by its index in the children list. */
   scrollToItem?(elementId: number, index: number): void
   /** Scroll every ancestor scroll box so the element shows, like the web
    *  scrollIntoView. block places it on the y axis and inline on the x
    *  axis: "start", "center", "end" or "nearest". The defaults match the
-   *  web: "start" and "nearest". */
-  scrollIntoView?(elementId: number, block?: string, inline?: string): void
+   *  web: "start" and "nearest". behavior works like the scrollTo one. */
+  scrollIntoView?(elementId: number, block?: string, inline?: string, behavior?: string): void
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset?(elementId: number): Array<number> | null
 

@@ -691,8 +691,9 @@ impl TestGpuixRenderer {
     /// x and y are negative pixel values (scroll down = more negative y).
     /// Call flush() after to apply the offset and re-render.
     #[napi]
-    pub fn scroll_to(&self, element_id: f64, x: f64, y: f64) -> Result<()> {
+    pub fn scroll_to(&self, element_id: f64, x: f64, y: f64, behavior: Option<String>) -> Result<()> {
         let id = to_element_id(element_id)?;
+        let behavior = crate::renderer::scroll_motion::Behavior::parse(behavior.as_deref());
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
@@ -700,8 +701,17 @@ impl TestGpuixRenderer {
                     if view.set_virtual_list_offset(id, x as f32, y as f32) {
                         return;
                     }
+                    let smooth = {
+                        let tree = view.tree.lock().unwrap();
+                        behavior.smooth(tree.elements.get(&id).and_then(|el| el.style.as_deref()))
+                    };
                     if let Some(handle) = view.scroll_handles.get(&id) {
-                        handle.set_offset(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
+                        let to = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
+                        if smooth {
+                            crate::renderer::scroll_motion::animate(id, handle, to);
+                        } else {
+                            handle.set_offset(to);
+                        }
                     }
                 });
             })
@@ -718,17 +728,19 @@ impl TestGpuixRenderer {
         element_id: f64,
         block: Option<String>,
         inline: Option<String>,
+        behavior: Option<String>,
     ) -> Result<()> {
         use crate::renderer::scroll_into_view::{scroll_into_view, Align};
         let id = to_element_id(element_id)?;
         let block = Align::parse(block.as_deref(), Align::Start);
         let inline = Align::parse(inline.as_deref(), Align::Nearest);
+        let behavior = crate::renderer::scroll_motion::Behavior::parse(behavior.as_deref());
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
                 view.update(app, |view, _cx| {
                     let tree = view.tree.lock().unwrap();
-                    scroll_into_view(&tree, id, block, inline, |id| {
+                    scroll_into_view(&tree, id, block, inline, behavior, |id| {
                         view.scroll_handles.get(&id).cloned()
                     });
                 });
