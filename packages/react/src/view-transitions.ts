@@ -15,6 +15,8 @@ export interface ViewTransitionSide {
   translateX?: [ViewTransitionLength, ViewTransitionLength]
   translateY?: [ViewTransitionLength, ViewTransitionLength]
   opacity?: [number, number]
+  /** A `filter: blur()` sigma in pixels. */
+  blur?: [number, number]
   /** Paint this side over the other one. Only read on `old`. */
   onTop?: boolean
 }
@@ -45,7 +47,9 @@ export interface ViewTransitionOptions {
  * Run `update` and animate every element that carries a
  * `viewTransitionName` from its place before the update to its place after
  * it. Give the leaving screen and the arriving screen the same name to
- * animate a navigation as a pair.
+ * animate a navigation as a pair. A name that only leaves paints a frozen
+ * copy over the tree while its group's `old` side runs, without the clip
+ * of its former ancestors.
  *
  * On a renderer without the native methods, this runs `update` alone.
  */

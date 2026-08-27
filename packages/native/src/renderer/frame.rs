@@ -52,6 +52,11 @@ pub(super) struct BuildCtx<'a> {
     /// The running view transition, or `None`. Cleared inside the build of a
     /// frozen copy, so a name inside the copy never starts a nested one.
     pub vt: Option<&'a super::view_transition::VtState>,
+    /// Whether this build is the frozen copy of a view transition. A copy is
+    /// a still image, so it gets no scrollbar. The scrollbar defers its draw,
+    /// and a deferred draw from inside the copy's isolated layout would read
+    /// its layout ids against the window's tree and panic.
+    pub frozen: bool,
 }
 
 // ── Element builders ─────────────────────────────────────────────────
@@ -97,8 +102,9 @@ pub(super) fn build_element(
     let style = element.style.as_deref();
 
     // This frame of the view transition, when one runs and the element
-    // carries a name. The opacity of the arriving side folds into the motion
-    // channel here, and the movement applies at paint in the wrapper below.
+    // carries a name. The opacity and blur of the arriving side fold into the
+    // motion channel here, and the movement applies at paint in the wrapper
+    // below.
     let vt_frame = ctx.vt.and_then(|vt| {
         let name = style?.view_transition_name.as_deref()?;
         if name.is_empty() || name == "none" {
@@ -106,12 +112,15 @@ pub(super) fn build_element(
         }
         vt.frame_for(name)
     });
-    let motion = match vt_frame.as_ref().and_then(|frame| frame.new_opacity()) {
-        Some(opacity) => Some(match motion {
-            Some(frame) => frame.with_view_transition_opacity(opacity),
-            None => crate::motion::MotionFrame::view_transition_opacity(opacity),
+    let motion = match vt_frame
+        .as_ref()
+        .map(|frame| (frame.new_opacity(), frame.new_blur()))
+    {
+        Some((opacity, blur)) if opacity.is_some() || blur.is_some() => Some(match motion {
+            Some(frame) => frame.with_view_transition(opacity, blur),
+            None => crate::motion::MotionFrame::view_transition_frame(opacity, blur),
         }),
-        None => motion,
+        _ => motion,
     };
 
     // Inheritable style resolves before the element's own style, because a
@@ -499,9 +508,12 @@ pub(crate) fn build_div(
             el = el.track_scroll(handle);
 
             // The scrollbar. Classic bars reserve a gutter in the layout,
-            // which taffy takes as one width for both axes.
+            // which taffy takes as one width for both axes. A frozen view
+            // transition copy gets none: see `BuildCtx::frozen`.
             let mode = super::scrollbar::Mode::current(cx);
-            if let Some(spec) = super::scrollbar::Spec::from_style(style, mode) {
+            if let Some(spec) =
+                super::scrollbar::Spec::from_style(style, mode).filter(|_| !ctx.frozen)
+            {
                 let state = ctx.scrollbars.entry(element.id).or_default().clone();
                 let reserved = spec.reserved(state.borrow().overflowed);
                 let gutter = reserved.x.max(reserved.y);

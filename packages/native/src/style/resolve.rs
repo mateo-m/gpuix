@@ -216,6 +216,9 @@ pub(crate) fn apply_motion<E: gpui::Styled>(
     if let Some(opacity) = motion.opacity {
         el = el.opacity(opacity as f32);
     }
+    if let Some(blur) = motion.blur {
+        el = el.blur(gpui::px(blur as f32));
+    }
     el
 }
 

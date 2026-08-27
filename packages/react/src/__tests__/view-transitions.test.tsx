@@ -122,6 +122,32 @@ describeNative("view transitions", () => {
     expect(boundsOf(id)![1]).toBeCloseTo(0, 0)
   })
 
+  it("paints an exit copy for a name that leaves without a successor", () => {
+    const { render, renderer } = root
+    renderer.clockPause()
+    render(<Screen label="A" color="#ff0000" />)
+    const oldId = screenId()
+    const baseX = boundsOf(oldId)![0]
+
+    // The next tree has no element with the name. The frozen copy paints
+    // over the tree and the `old` side slides and blurs it out.
+    startViewTransition(renderer, () => render(<div style={{ width: 300, height: 200 }} />), {
+      groups: {
+        screen: {
+          duration: 0.3,
+          ease: "linear",
+          old: { translateX: ["0%", "100%"], opacity: [1, 0], blur: [0, 6] },
+        },
+      },
+    })
+
+    expect(boundsOf(oldId)![0]).toBeCloseTo(baseX, 0)
+    renderer.clockFastForward(150)
+    expect(boundsOf(oldId)![0]).toBeCloseTo(baseX + 150, 0)
+    renderer.clockFastForward(400)
+    expect(boundsOf(oldId)).toBeNull()
+  })
+
   it("a fresh start replaces a running transition", () => {
     const { render, renderer } = root
     renderer.clockPause()
