@@ -351,6 +351,73 @@ fn snap_areas(
     areas
 }
 
+/// The rest offset of each snap area on one axis, for a scroll marker
+/// group. One offset per area, sorted from the start of the content, so
+/// the nth marker stands for the nth stop. Areas that clamp onto the same
+/// offset keep their own marker, the way `::scroll-marker` keeps one per
+/// element. A container that has not painted yet has no offsets.
+pub(crate) fn marker_targets(
+    tree: &RetainedTree,
+    container: u64,
+    handle: &ScrollHandle,
+    handles: &HashMap<u64, ScrollHandle>,
+    horizontal: bool,
+) -> Vec<Pixels> {
+    let Some(bounds) = crate::automation::get_bounds(container) else {
+        return Vec::new();
+    };
+    let style = |id: u64| tree.elements.get(&id).and_then(|el| el.style.as_deref());
+    let padding = scroll_padding(style(container));
+    let (port_start, port_end) = if horizontal {
+        (
+            bounds.x as f32 + padding[3],
+            (bounds.x + bounds.width) as f32 - padding[1],
+        )
+    } else {
+        (
+            bounds.y as f32 + padding[0],
+            (bounds.y + bounds.height) as f32 - padding[2],
+        )
+    };
+    let offset = handle.offset();
+    let max = handle.max_offset();
+    let (current, max) = if horizontal {
+        (f32::from(offset.x), max.x)
+    } else {
+        (f32::from(offset.y), max.y)
+    };
+
+    let mut targets: Vec<Pixels> = snap_areas(tree, container, handles)
+        .into_iter()
+        .filter_map(|id| {
+            let area = crate::automation::get_bounds(id)?;
+            let words = snap_align(style(id));
+            let align = if horizontal {
+                words[1].or(words[0])
+            } else {
+                words[0].or(words[1])
+            }
+            .unwrap_or(Align::Start);
+            let margin = scroll_margin(style(id));
+            let (start, end) = if horizontal {
+                (
+                    area.x as f32 - margin[3],
+                    (area.x + area.width) as f32 + margin[1],
+                )
+            } else {
+                (
+                    area.y as f32 - margin[0],
+                    (area.y + area.height) as f32 + margin[2],
+                )
+            };
+            let delta = axis_delta(align, start, end, port_start, port_end);
+            Some(px((current - delta).max(-f32::from(max)).min(0.0)))
+        })
+        .collect();
+    targets.sort_by(|a, b| f32::from(*b).total_cmp(&f32::from(*a)));
+    targets
+}
+
 /// One candidate snap position on one axis.
 struct Candidate {
     offset: f32,

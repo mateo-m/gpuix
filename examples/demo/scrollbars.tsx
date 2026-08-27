@@ -189,8 +189,8 @@ function Snap() {
   const colors = ["#7c6cff", "#22c55e", "#e11d48", "#f59e0b", "#06b6d4", "#a855f7"]
   return (
     <Panel
-      title="scroll-snap-type and scroll-snap-align"
-      note="Scroll the carousel and let go. When the scroll rests, the box glides to the nearest card and centers it. The third card sets scroll-snap-stop: always, so a long scroll cannot pass over it."
+      title="scroll-snap-type, scroll-snap-align and scroll-marker-group"
+      note="Scroll the carousel and let go. When the scroll rests, the box glides to the nearest card and centers it. The third card sets scroll-snap-stop: always, so a long scroll cannot pass over it. scroll-marker-group: after adds one dot per card along the bottom edge. A click on a dot glides to its card, and the dot of the nearest card paints stronger."
     >
       <div
         className="row rounded border w-full"
@@ -198,6 +198,8 @@ function Snap() {
           height: 150,
           overflowX: "auto",
           scrollSnapType: "x mandatory",
+          scrollMarkerGroup: "after",
+          scrollBehavior: "smooth",
           backgroundColor: "var(--color-raised)",
         }}
       >
@@ -260,6 +262,46 @@ function Smooth() {
   )
 }
 
+/// A progress bar the scroll offset drives. The box publishes a timeline
+/// under a name, and the bar's motion points its animation-timeline at it,
+/// so the scroll offset replaces the clock.
+function Timeline() {
+  return (
+    <Panel
+      title="scroll-timeline and animation-timeline"
+      note="The box declares scroll-timeline: --reading. The bar above it points animation-timeline at that name, so its motion runs from initial to animate as the box scrolls, with no clock. Scroll the box and the bar follows, in both directions."
+    >
+      <div className="col gap-2 w-full">
+        <div
+          className="rounded"
+          style={{ width: 320, height: 6, backgroundColor: "var(--color-track)" }}
+        >
+          <div
+            className="rounded"
+            style={{ height: 6, animationTimeline: "--reading", backgroundColor: "var(--color-brand)" }}
+            motion={{
+              initial: { width: 0 },
+              animate: { width: 320 },
+              transition: { ease: "linear" },
+            }}
+          />
+        </div>
+        <div
+          className="col rounded border w-full"
+          style={{
+            height: 150,
+            overflowY: "auto",
+            scrollTimeline: "--reading block",
+            backgroundColor: "var(--color-raised)",
+          }}
+        >
+          <Rows count={30} />
+        </div>
+      </div>
+    </Panel>
+  )
+}
+
 export function Scrollbars() {
   return (
     <>
@@ -268,6 +310,7 @@ export function Scrollbars() {
       <BothAxes />
       <IntoView />
       <Snap />
+      <Timeline />
       <Smooth />
     </>
   )

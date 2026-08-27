@@ -532,6 +532,20 @@ style_desc! {
     scroll_snap_stop: Option<String> = "scrollSnapStop",
     /// `none`, or `nearest` to scroll this element into view when it mounts.
     scroll_initial_target: Option<String> = "scrollInitialTarget",
+    /// The shorthand for the two longhands below: a `--name`, then an
+    /// optional axis word.
+    scroll_timeline: Option<String> = "scrollTimeline",
+    /// A `--name` this box publishes its scroll progress under, or `none`.
+    scroll_timeline_name: Option<String> = "scrollTimelineName",
+    /// `block` (the default, vertical), `inline` (horizontal), `x` or `y`.
+    scroll_timeline_axis: Option<String> = "scrollTimelineAxis",
+    /// A `--name` or `scroll(nearest | self | root, axis)`. The `motion`
+    /// prop of this element then follows that box's scroll progress
+    /// instead of the clock.
+    animation_timeline: Option<String> = "animationTimeline",
+    /// `none`, `before` or `after`: paint a clickable dot for each snap
+    /// area of this box, at the start or the end edge.
+    scroll_marker_group: Option<String> = "scrollMarkerGroup",
 
     // View transitions. The name pairs the element that leaves with the
     // element that arrives across one `startViewTransition` call.

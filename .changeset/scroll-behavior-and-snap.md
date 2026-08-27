@@ -26,6 +26,19 @@ once, on the first frame after it paints.
 GPUIX lays text out horizontally, left to right, so block is vertical and
 inline is horizontal.
 
-Out of scope: `scroll-timeline-*` needs CSS animations and
-`scroll-marker-group` needs the `::scroll-marker` pseudo-element. GPUIX has
-neither, so these properties stay unread.
+`scroll-timeline` (and the `-name` and `-axis` longhands) on a scroll box
+publishes a timeline, and `animation-timeline` on an element points its
+`motion` at one: a `--name`, or the anonymous
+`scroll(nearest | self | root, axis)`. GPUIX has no `@keyframes`, so the
+`motion` prop is the keyframes source: `initial` is 0%, `animate` is 100%,
+and `transition.ease` bends the progress. Duration and delay play no part,
+because the scroll offset is the clock. Two divergences from CSS, on
+purpose: a missing or `none` value keeps the clock instead of freezing the
+animation, and a `--name` no box declares holds the progress at 0.
+
+`scroll-marker-group: before | after` on a scroll box adds a group of
+markers along that edge, one per snap area. The marker of the area nearest
+the current offset paints stronger, and a click on a marker scrolls to its
+area, with a glide when `scroll-behavior: smooth` applies. GPUIX has no
+pseudo-elements, so the markers are round dots rather than
+`::scroll-marker` content.
