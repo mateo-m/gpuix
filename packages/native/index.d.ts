@@ -75,6 +75,17 @@ export declare class GpuixRenderer {
    * box apply.
    */
   scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
+  /**
+   * Clone every element that has a `viewTransitionName`, with its painted
+   * bounds. Call this before the React update, then `viewTransitionStart`
+   * after it. `startViewTransition` in `@gpuix/react` does both.
+   */
+  viewTransitionCapture(): void
+  /**
+   * Animate every captured name toward its new element. `options` is the
+   * JSON of a `ViewTransitionOptions` value, or nothing for a crossfade.
+   */
+  viewTransitionStart(options?: string | undefined | null): void
   /** Hidden → minimal → full → hidden. */
   cycleDebugFrameOverlay(): string
   getDebugFrameOverlay(): string
@@ -304,6 +315,16 @@ export declare class TestGpuixRenderer {
    * web scrollIntoView. Call flush() after to apply and re-render.
    */
   scrollIntoView(elementId: number, block?: string | undefined | null, inline?: string | undefined | null): void
+  /**
+   * Clone every element that has a `viewTransitionName`, with its painted
+   * bounds. Call flush() first, so the bounds are current.
+   */
+  viewTransitionCapture(): void
+  /**
+   * Animate every captured name toward its new element. Call flush()
+   * after, and move the automation clock to step through the frames.
+   */
+  viewTransitionStart(options?: string | undefined | null): void
   /**
    * Scroll a child into view by its index in the children list.
    * Call flush() after to apply and re-render.

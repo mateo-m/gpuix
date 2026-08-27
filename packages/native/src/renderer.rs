@@ -50,6 +50,7 @@ mod batch;
 mod frame;
 pub(crate) mod scroll_into_view;
 pub(crate) mod scrollbar;
+pub(crate) mod view_transition;
 mod virtual_list;
 
 pub use batch::apply_batch_to_tree;
@@ -291,6 +292,10 @@ enum UiCommand {
         block: scroll_into_view::Align,
         inline: scroll_into_view::Align,
     },
+    ViewTransitionCapture,
+    ViewTransitionStart {
+        options: String,
+    },
     GetScrollOffset {
         id: u64,
         response: SyncSender<Option<[f64; 2]>>,
@@ -427,6 +432,19 @@ async fn run_ui_commands(
                         scroll_into_view::scroll_into_view(&tree, id, block, inline, |id| {
                             SCROLL_HANDLES.with(|cell| cell.borrow().get(&id).cloned())
                         });
+                    })
+                    .ok();
+                refresh_ui_window(window, cx)
+            }
+            UiCommand::ViewTransitionCapture => window.update(cx, |view, _window, _cx| {
+                view.view_transition_capture();
+            }),
+            UiCommand::ViewTransitionStart { options } => {
+                window
+                    .update(cx, move |view, _window, _cx| {
+                        if let Err(error) = view.view_transition_start(&options) {
+                            log::warn!("Invalid view transition options: {error}");
+                        }
                     })
                     .ok();
                 refresh_ui_window(window, cx)
@@ -1251,6 +1269,51 @@ impl GpuixRenderer {
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
         return self.send_ui_command(UiCommand::ScrollIntoView { id, block, inline });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Clone every element that has a `viewTransitionName`, with its painted
+    /// bounds. Call this before the React update, then `viewTransitionStart`
+    /// after it. `startViewTransition` in `@gpuix/react` does both.
+    #[napi]
+    pub fn view_transition_capture(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|view, _window, _cx| view.view_transition_capture());
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ViewTransitionCapture);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason("Unsupported operating system"))
+    }
+
+    /// Animate every captured name toward its new element. `options` is the
+    /// JSON of a `ViewTransitionOptions` value, or nothing for a crossfade.
+    #[napi]
+    pub fn view_transition_start(&self, options: Option<String>) -> Result<()> {
+        let options = options.unwrap_or_else(|| "{}".to_string());
+        #[cfg(target_os = "macos")]
+        {
+            update_window(move |view, _window, _cx| {
+                view.view_transition_start(&options).map_err(Error::from_reason)
+            })??;
+            return invalidate_window();
+        }
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ViewTransitionStart { options });
 
         #[cfg(not(any(
             target_os = "macos",
@@ -2640,6 +2703,10 @@ pub(crate) struct GpuixView {
     /// Resolved `highlight` state, keyed by the element that declared it.
     /// Empty in every app that does not use search.
     highlights: HashMap<u64, HighlightCacheEntry>,
+    /// The running view transition, when one runs.
+    view_transition: Option<view_transition::VtState>,
+    /// Captures `viewTransitionCapture` took, waiting for the start call.
+    pending_view_transition: Option<HashMap<String, view_transition::VtCapture>>,
 }
 
 /// Two-level cache for one element's `highlight`.
@@ -2773,7 +2840,31 @@ impl GpuixView {
             clock: crate::automation::AutomationClock::new(),
             root_cascade: RefCell::new(None),
             highlights: HashMap::new(),
+            view_transition: None,
+            pending_view_transition: None,
         }
+    }
+
+    /// Clone every named element and its painted bounds, before the tree
+    /// swaps. `view_transition_start` consumes the result.
+    pub(crate) fn view_transition_capture(&mut self) {
+        let tree = self.tree.lock().unwrap();
+        self.pending_view_transition = Some(view_transition::capture(&tree));
+    }
+
+    /// Start the transition against the tree as it is now. A start without a
+    /// capture still animates the names the new tree carries.
+    pub(crate) fn view_transition_start(
+        &mut self,
+        options_json: &str,
+    ) -> std::result::Result<(), String> {
+        let options = view_transition::VtOptions::parse(options_json)?;
+        let captures = self.pending_view_transition.take().unwrap_or_default();
+        let tree = self.tree.lock().unwrap();
+        let state = view_transition::VtState::new(captures, options, &tree);
+        drop(tree);
+        self.view_transition = Some(state);
+        Ok(())
     }
 
     /// The root cascade for `theme`, reusing the last one while the theme
@@ -2886,6 +2977,7 @@ impl GpuixView {
             highlight,
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
+            vt: self.view_transition.as_ref(),
         };
         let child = build_element(expected_child_id, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
@@ -3077,25 +3169,38 @@ impl gpui::Render for GpuixView {
         // Sync focus handles before building elements.
         self.sync_focus_handles(&tree, &callback, window, cx);
 
+        // One frame of the running view transition, taken out of `self` so
+        // the build can borrow the rest of the view. A transition past its
+        // end drops here, and the frame paints the live tree alone.
+        let now = self.clock.now();
+        let view_transition = self.view_transition.take().and_then(|mut transition| {
+            transition.tick(now).then_some(transition)
+        });
+        let kept_by_transition = |id: &u64| {
+            view_transition
+                .as_ref()
+                .is_some_and(|transition| transition.keeps(*id))
+        };
+
         // Ensure custom element instances are destroyed when their IDs disappear.
+        // A frozen view-transition copy keeps its instances until it fades.
         self.custom_registry
-            .prune_missing(|id| tree.elements.contains_key(&id));
+            .prune_missing(|id| tree.elements.contains_key(&id) || kept_by_transition(&id));
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
         // from scroll to non-scroll) is handled inside build_div().
         self.scroll_handles
-            .retain(|id, _| tree.elements.contains_key(id));
+            .retain(|id, _| tree.elements.contains_key(id) || kept_by_transition(id));
         self.virtual_lists
-            .retain(|id, _| tree.elements.contains_key(id));
+            .retain(|id, _| tree.elements.contains_key(id) || kept_by_transition(id));
         self.motion_states
-            .retain(|id, _| tree.elements.contains_key(id));
+            .retain(|id, _| tree.elements.contains_key(id) || kept_by_transition(id));
 
         // Build the element tree. custom_registry, focus_handles, and scroll_handles
         // are different fields of self, so Rust allows borrowing all simultaneously.
         let theme = Theme::dark();
         let root_cascade = self.root_cascade(&theme, window.rem_size());
-        let now = self.clock.now();
         let mut motion_active = false;
         // Pruned by DECLARATION, not existence: an element that drops its
         // `highlight` prop keeps living, and its cached group list holds a copy
@@ -3124,11 +3229,17 @@ impl gpui::Render for GpuixView {
                     highlight: None,
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
+                    vt: view_transition.as_ref(),
                 };
                 build_element(root_id, &mut ctx, window, cx)
             }
             None => gpui::Empty.into_any_element(),
         };
+        // A transition animates every frame until it comes to rest.
+        if view_transition.is_some() {
+            motion_active = true;
+        }
+        self.view_transition = view_transition;
         // Flushed after the root build so a `setState` in the handler cannot
         // re-enter this build.
         emit_highlight_events(&callback, &highlight_events);

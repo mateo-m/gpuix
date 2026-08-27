@@ -65,6 +65,8 @@ interface NativeTestRendererApi extends NativeRenderer {
   scrollToItem(elementId: number, index: number): void
   scrollIntoView(elementId: number, block?: string, inline?: string): void
   getScrollOffset(elementId: number): number[] | null
+  viewTransitionCapture(): void
+  viewTransitionStart(options?: string): void
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
@@ -549,6 +551,22 @@ export class TestRenderer implements NativeRenderer {
     const result = this.native.getScrollOffset(elementId)
     if (!result) return null
     return [result[0], result[1]]
+  }
+
+  // ── View transitions ────────────────────────────────────────────
+
+  /** Clone every element that has a `viewTransitionName`, with its painted
+   *  bounds. The flush first makes those bounds current. */
+  viewTransitionCapture(): void {
+    this.native.flush()
+    this.native.viewTransitionCapture()
+  }
+
+  /** Animate every captured name toward its new element. Pause the clock
+   *  first and move it to step through the frames. */
+  viewTransitionStart(options?: string): void {
+    this.native.viewTransitionStart(options)
+    this.native.flush()
   }
 
   // ── Selection API ───────────────────────────────────────────────

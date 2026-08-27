@@ -49,6 +49,9 @@ pub(super) struct BuildCtx<'a> {
     /// would re-enter the build and emit again. They are flushed once the root
     /// build has returned.
     pub highlight_events: &'a mut Vec<(u64, usize)>,
+    /// The running view transition, or `None`. Cleared inside the build of a
+    /// frozen copy, so a name inside the copy never starts a nested one.
+    pub vt: Option<&'a super::view_transition::VtState>,
 }
 
 // ── Element builders ─────────────────────────────────────────────────
@@ -92,6 +95,24 @@ pub(super) fn build_element(
         None
     };
     let style = element.style.as_deref();
+
+    // This frame of the view transition, when one runs and the element
+    // carries a name. The opacity of the arriving side folds into the motion
+    // channel here, and the movement applies at paint in the wrapper below.
+    let vt_frame = ctx.vt.and_then(|vt| {
+        let name = style?.view_transition_name.as_deref()?;
+        if name.is_empty() || name == "none" {
+            return None;
+        }
+        vt.frame_for(name)
+    });
+    let motion = match vt_frame.as_ref().and_then(|frame| frame.new_opacity()) {
+        Some(opacity) => Some(match motion {
+            Some(frame) => frame.with_view_transition_opacity(opacity),
+            None => crate::motion::MotionFrame::view_transition_opacity(opacity),
+        }),
+        None => motion,
+    };
 
     // Inheritable style resolves before the element's own style, because a
     // custom property declared here is in scope for the `var()` next to it.
@@ -196,6 +217,10 @@ pub(super) fn build_element(
     };
 
     let built = super::auto_height::wrap(id, built, motion.as_ref(), resolved.as_deref());
+    let built = match vt_frame {
+        Some(frame) => super::view_transition::wrap(element, built, frame, ctx, window, cx),
+        None => built,
+    };
 
     ctx.cascade = parent_cascade;
     ctx.highlight = parent_highlight;
