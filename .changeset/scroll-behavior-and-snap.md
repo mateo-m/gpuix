@@ -79,3 +79,8 @@ part that overlaps the glide. The stream outlives a short glide by a
 second or more, and the tail pushed the box off the snap position the
 moment the glide ended. A gap of more than 100ms ends the stream, so a
 later mouse wheel still scrolls.
+
+The box never snaps while the fingers stay on the pad, however long
+they rest. The web snaps at the end of the gesture, not during it. The
+lift after a rest has zero velocity, so the box then snaps to the
+nearest position.

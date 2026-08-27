@@ -252,6 +252,12 @@ fn predicted_landing(
     now: Instant,
 ) -> Point<Pixels> {
     let offset = handle.offset();
+    // Only fresh deltas count. The fingers resting on the pad before the
+    // lift means zero velocity, not the speed of the pulls before the rest.
+    let samples: Vec<_> = samples
+        .iter()
+        .filter(|(at, _)| (now - *at).as_secs_f64() <= VELOCITY_WINDOW_SECONDS)
+        .collect();
     let span = samples
         .first()
         .map(|(at, _)| (now - *at).as_secs_f32())
@@ -511,6 +517,17 @@ fn snap_containers(
             });
             if animating {
                 // The glide is ours. Track it without arming the idle timer.
+                state.offset = offset;
+                state.moved_at = None;
+                continue;
+            }
+            let down = GESTURES.with(|cell| {
+                cell.borrow().get(&id).is_some_and(|gesture| gesture.down)
+            });
+            if down {
+                // The fingers are on the pad. The web never snaps during
+                // the drag, however long the box rests. The lift picks
+                // the target.
                 state.offset = offset;
                 state.moved_at = None;
                 continue;
