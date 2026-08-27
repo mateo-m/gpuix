@@ -16,10 +16,13 @@ import { Panel } from "./ui.js"
 const HEADER_HEIGHT = 56
 /// How far past the bar the backdrop blur fades out.
 const BLUR_TAIL = 28
+/// A spring without bounce: fast out of the gate, a long soft landing,
+/// and no overshoot, like a critically damped UIKit spring.
+const SPRING: [number, number, number, number] = [0.36, 0.66, 0.04, 1]
 
 const PUSH: ViewTransitionOptions = {
-  duration: 0.35,
-  ease: "easeOut",
+  duration: 0.45,
+  ease: SPRING,
   groups: {
     screen: {
       old: { translateX: ["0%", "-30%"] },
@@ -34,8 +37,8 @@ const PUSH: ViewTransitionOptions = {
 }
 
 const POP: ViewTransitionOptions = {
-  duration: 0.35,
-  ease: "easeOut",
+  duration: 0.45,
+  ease: SPRING,
   groups: {
     screen: {
       old: { translateX: ["0%", "100%"], onTop: true },
@@ -101,9 +104,8 @@ function Header({ screen, onBack }: {
           left: 0,
           right: 0,
           height: HEADER_HEIGHT + BLUR_TAIL,
-          backdropFilter: "blur(16px) saturate(160%)",
+          backdropFilter: "blur(16px)",
           maskImage: "linear-gradient(to bottom, black 50%, ease-in-out, transparent)",
-          backgroundColor: "rgb(10 10 14 / 0.4)",
           pointerEvents: "none",
         }}
       />

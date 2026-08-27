@@ -428,6 +428,17 @@ impl VtElementFrame {
             .map(|[from, to]| motion::mix(from, to, self.t).max(0.0))
     }
 
+    /// How far past the group's bounds this frame's blur reaches: three
+    /// sigmas of the widest blur among the two sides. The group's mask
+    /// grows by this, so the halo paints instead of clipping at the edge.
+    fn mask_inflation(&self) -> Pixels {
+        let sigma = self
+            .new_blur()
+            .unwrap_or(0.0)
+            .max(self.old_blur().unwrap_or(0.0));
+        px((3.0 * sigma).ceil() as f32)
+    }
+
     fn offset(x: Option<[VtLen; 2]>, y: Option<[VtLen; 2]>, t: f64, extent: Size<Pixels>) -> Point<Pixels> {
         let resolve = |lens: Option<[VtLen; 2]>, extent: f32| {
             lens.map_or(0.0, |[from, to]| {
@@ -529,10 +540,18 @@ fn build_frozen(
         .h(capture.size.height)
         .overflow_hidden();
     shell.style().opacity = Some(frame.old_opacity() as f32);
-    if let Some(blur) = frame.old_blur() {
-        shell = shell.blur(px(blur as f32));
+    let shell = shell.child(content);
+    // The blur rides a wrapper that does not clip. On the shell itself,
+    // its `overflow: hidden` would clip the halo at the captured edge.
+    match frame.old_blur() {
+        Some(blur) => gpui::div()
+            .w(capture.size.width)
+            .h(capture.size.height)
+            .blur(px(blur as f32))
+            .child(shell)
+            .into_any_element(),
+        None => shell.into_any_element(),
     }
-    shell.child(content).into_any_element()
 }
 
 /// Build a frozen copy for every captured name that has no live element this
@@ -599,7 +618,9 @@ struct OldCopy {
 /// around a transition lays out exactly as it will at rest. Movement happens
 /// at paint: the child prepaints under an element offset, and the frozen copy
 /// prepaints at its captured bounds. Both paint inside the group's bounds as
-/// a mask, so a slide stays inside the element's own area.
+/// a mask, so a slide stays inside the element's own area. When a side blurs,
+/// the mask grows by the blur's support, so the halo shows instead of
+/// clipping at the edge.
 struct VtGroup {
     child: AnyElement,
     old: Option<OldCopy>,
@@ -638,7 +659,8 @@ impl Element for VtGroup {
         cx: &mut App,
     ) {
         let offset = self.frame.new_offset(bounds.size);
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        let mask = bounds.dilate(self.frame.mask_inflation());
+        window.with_content_mask(Some(ContentMask { bounds: mask }), |window| {
             if let Some(old) = &mut self.old {
                 let element = &mut old.element;
                 let origin = old.origin;
@@ -671,7 +693,8 @@ impl Element for VtGroup {
         window: &mut Window,
         cx: &mut App,
     ) {
-        window.with_content_mask(Some(ContentMask { bounds }), |window| {
+        let mask = bounds.dilate(self.frame.mask_inflation());
+        window.with_content_mask(Some(ContentMask { bounds: mask }), |window| {
             let paint_old = |old: &mut Option<OldCopy>, window: &mut Window, cx: &mut App| {
                 if let Some(old) = old {
                     let element = &mut old.element;
