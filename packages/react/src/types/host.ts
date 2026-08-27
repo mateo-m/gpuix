@@ -337,6 +337,27 @@ export interface StyleDesc {
   /** `none`, or `nearest` to scroll this element into view once, when it
    *  first paints. */
   scrollInitialTarget?: string
+  /** The shorthand: a `--name` and an optional axis, so a scroll box
+   *  publishes a timeline other elements point their `motion` at. */
+  scrollTimeline?: string
+  /** The `--name` of the timeline this scroll box publishes. Wins over
+   *  the shorthand. */
+  scrollTimelineName?: string
+  /** `block` (or `y`, the default) reads the vertical offset, `inline`
+   *  (or `x`) the horizontal one. */
+  scrollTimelineAxis?: string
+  /** Points the `motion` prop at a scroll timeline: a `--name`, or
+   *  `scroll(nearest | self | root, axis)`. The scroll offset then drives
+   *  the progress from `initial` (0%) to `animate` (100%), and
+   *  `transition.ease` bends it. Duration and delay play no part. A name
+   *  no box declares holds the animation at 0. Any other value keeps the
+   *  clock. */
+  animationTimeline?: string
+  /** `before` or `after` adds a group of markers along that edge of this
+   *  scroll box, one marker per snap area. A click on a marker scrolls to
+   *  its area. GPUIX has no pseudo-elements, so the markers are round
+   *  dots rather than `::scroll-marker` content. */
+  scrollMarkerGroup?: string
   /** The name that pairs this element across a `startViewTransition` call:
    *  the old element with this name animates into the new one. */
   viewTransitionName?: string

@@ -72,6 +72,7 @@ pub(super) fn build_element(
     let Some(element) = ctx.tree.elements.get(&id) else {
         return gpui::Empty.into_any_element();
     };
+    let style = element.style.as_deref();
 
     // The motion frame for this element, or `None` when it does not animate.
     let motion = if let Some(source) = element.custom_props.get("motion") {
@@ -91,15 +92,28 @@ pub(super) fn build_element(
             log::warn!("Invalid motion update for element {id}: {error}");
         }
         state.is_valid().then(|| {
-            let frame = state.frame(ctx.now);
-            *ctx.motion_active |= frame.active;
-            frame
+            // An `animation-timeline` that names a scroll timeline swaps
+            // the clock for the scroll offset. The frame then asks for no
+            // animation frames, because a scroll repaints on its own.
+            let timeline = style
+                .and_then(|style| style.animation_timeline.as_deref())
+                .filter(|value| super::scroll_timeline::requested(value));
+            if timeline.is_some() {
+                let progress = super::scroll_timeline::resolve(ctx.tree, id).map_or(
+                    0.0,
+                    |timeline| super::scroll_timeline::progress(ctx.scroll_handles, timeline),
+                );
+                state.frame_at(progress)
+            } else {
+                let frame = state.frame(ctx.now);
+                *ctx.motion_active |= frame.active;
+                frame
+            }
         })
     } else {
         ctx.motion_states.remove(&id);
         None
     };
-    let style = element.style.as_deref();
 
     // This frame of the view transition, when one runs and the element
     // carries a name. The opacity and blur of the arriving side fold into the
@@ -471,6 +485,7 @@ pub(crate) fn build_div(
     // flex + min_w_0 on the scroller, flex_none on the child.
     let mut overflow_x_only = false;
     let mut scrollbar = None;
+    let mut markers = None;
     if let Some(style) = style {
         // Resolve each axis: axis-specific overrides shorthand.
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
@@ -504,8 +519,9 @@ pub(crate) fn build_div(
             let handle = ctx
                 .scroll_handles
                 .entry(element.id)
-                .or_insert_with(gpui::ScrollHandle::new);
-            el = el.track_scroll(handle);
+                .or_insert_with(gpui::ScrollHandle::new)
+                .clone();
+            el = el.track_scroll(&handle);
 
             // The scrollbar. Classic bars reserve a gutter in the layout,
             // which taffy takes as one width for both axes. A frozen view
@@ -535,6 +551,33 @@ pub(crate) fn build_div(
                     state,
                     ctx.now,
                 ));
+            }
+
+            // The scroll marker group, one marker per snap area. A frozen
+            // view transition copy gets none, for the same reason as the
+            // scrollbar: it defers its draw.
+            if !ctx.frozen {
+                if let Some(edge) = super::scroll_marker::edge(style) {
+                    let horizontal = needs_scroll_x && !needs_scroll_y;
+                    let targets = super::scroll_motion::marker_targets(
+                        ctx.tree,
+                        element.id,
+                        &handle,
+                        ctx.scroll_handles,
+                        horizontal,
+                    );
+                    if !targets.is_empty() {
+                        let smooth = super::scroll_motion::Behavior::Auto.smooth(Some(style));
+                        markers = Some(super::scroll_marker::MarkerGroup::new(
+                            element.id,
+                            handle.clone(),
+                            targets,
+                            horizontal,
+                            edge,
+                            smooth,
+                        ));
+                    }
+                }
             }
         } else {
             // Element is no longer scrollable — remove stale handle.
@@ -797,7 +840,10 @@ pub(crate) fn build_div(
         };
     }
 
-    // Last, so it paints over the content and takes the mouse first.
+    // Last, so they paint over the content and take the mouse first.
+    if let Some(markers) = markers {
+        el = el.child(markers);
+    }
     if let Some(scrollbar) = scrollbar {
         el = el.child(scrollbar);
     }

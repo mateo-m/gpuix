@@ -515,6 +515,20 @@ impl MotionState {
             measured: self.measured.clone(),
         }
     }
+
+    /// The frame at `progress`, for an animation a scroll timeline drives.
+    /// The share comes from the scroll offset instead of the clock, and the
+    /// transition's ease still bends it. Duration and delay play no part,
+    /// and the frame asks for no animation frames: a scroll repaints anyway.
+    pub(crate) fn frame_at(&self, progress: f64) -> MotionFrame {
+        let eased = ease(progress.clamp(0.0, 1.0), &self.transition.ease);
+        MotionFrame {
+            style: self.from.interpolate(self.target, eased),
+            active: false,
+            content: self.content,
+            measured: self.measured.clone(),
+        }
+    }
 }
 
 fn parse_description(source: &serde_json::Value) -> Result<MotionDescription, String> {
