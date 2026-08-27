@@ -382,12 +382,34 @@ fn build_virtual_list(
             cx,
         )
     });
-    let mut list =
-        gpui::list(list_state, render_item).with_sizing_behavior(gpui::ListSizingBehavior::Auto);
+    let mut list = gpui::list(list_state.clone(), render_item)
+        .with_sizing_behavior(gpui::ListSizingBehavior::Auto);
     if let Some(resolved) = element.resolved_style(&ctx.cascade) {
         list = crate::style::resolve::apply_resolved(list, &resolved.base);
     }
-    list.into_any_element()
+    if ctx.frozen {
+        return list.into_any_element();
+    }
+
+    // The bar. The list scrolls itself, outside the div path, so the
+    // `Scrollbar` child a div gets never reaches it. The bar reads the
+    // `ListState` for the offset and the measured content height. A
+    // classic bar takes its gutter as right padding, because the list
+    // ignores the taffy gutter.
+    let mode = super::scrollbar::Mode::current(cx);
+    let scope = ctx.cascade.scope();
+    let color = |word: &str| scope.color(word).map(crate::color::to_hsla);
+    let spec = super::scrollbar::Spec::for_list(element.style.as_deref(), mode, &color);
+    let state = ctx.scrollbars.entry(element.id).or_default().clone();
+    let gutter = spec.reserved(state.borrow().overflowed).y;
+    if gutter > gpui::px(0.0) {
+        list = list.pr(gutter);
+        if spec.both_edges() {
+            list = list.pl(gutter);
+        }
+    }
+    super::scrollbar::ListScrollbar::new(list.into_any_element(), spec, list_state, state, ctx.now)
+        .into_any_element()
 }
 
 pub(super) fn unmounted_virtual_row(height: f32) -> gpui::AnyElement {
@@ -579,7 +601,7 @@ pub(crate) fn build_div(
                 }
                 scrollbar = Some(super::scrollbar::Scrollbar::new(
                     spec,
-                    handle.clone(),
+                    super::scrollbar::ScrollSource::Handle(handle.clone()),
                     state,
                     ctx.now,
                 ));

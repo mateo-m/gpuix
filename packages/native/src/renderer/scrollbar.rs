@@ -50,6 +50,63 @@ impl Mode {
     }
 }
 
+/// The scrolling thing behind a bar. A div scrolls through a
+/// `ScrollHandle`. A virtual list scrolls through a `gpui::ListState`,
+/// which measures only the rows near the viewport, so its content
+/// height is an estimate that settles as rows measure.
+#[derive(Clone)]
+pub(crate) enum ScrollSource {
+    Handle(ScrollHandle),
+    List(gpui::ListState),
+}
+
+impl ScrollSource {
+    /// The viewport of the box, in window coordinates.
+    fn bounds(&self) -> Bounds<Pixels> {
+        match self {
+            Self::Handle(handle) => handle.bounds(),
+            Self::List(state) => state.viewport_bounds(),
+        }
+    }
+
+    /// The offset. It is negative when the content moved up or left.
+    fn offset(&self) -> Point<Pixels> {
+        match self {
+            Self::Handle(handle) => handle.offset(),
+            Self::List(state) => state.scroll_px_offset_for_scrollbar(),
+        }
+    }
+
+    fn max_offset(&self) -> Point<Pixels> {
+        match self {
+            Self::Handle(handle) => handle.max_offset(),
+            Self::List(state) => state.max_offset_for_scrollbar(),
+        }
+    }
+
+    fn set_offset(&self, offset: Point<Pixels>) {
+        match self {
+            Self::Handle(handle) => handle.set_offset(offset),
+            Self::List(state) => state.set_offset_from_scrollbar(offset),
+        }
+    }
+
+    /// A drag of the thumb starts. The list freezes its content height
+    /// for the drag, so a row that measures mid-drag cannot move the
+    /// thumb under the mouse.
+    fn drag_started(&self) {
+        if let Self::List(state) = self {
+            state.scrollbar_drag_started();
+        }
+    }
+
+    fn drag_ended(&self) {
+        if let Self::List(state) = self {
+            state.scrollbar_drag_ended();
+        }
+    }
+}
+
 /// CSS `scrollbar-width`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum Thickness {
@@ -126,21 +183,7 @@ impl Spec {
         if !scrolls.x && !scrolls.y {
             return None;
         }
-        let thickness = match style.scrollbar_width.as_deref().map(str::trim) {
-            Some("thin") => Thickness::Thin,
-            Some("none") => Thickness::None,
-            _ => Thickness::Auto,
-        };
-        let gutter = match style.scrollbar_gutter.as_deref().map(str::trim) {
-            Some("stable") => Gutter::Stable,
-            Some("stable both-edges") | Some("both-edges stable") => Gutter::StableBothEdges,
-            _ => Gutter::Auto,
-        };
-        let (thumb, track) = style
-            .scrollbar_color
-            .as_deref()
-            .map(|value| scrollbar_colors(value, color))
-            .unwrap_or((None, None));
+        let (thickness, gutter, thumb, track) = bar_words(style, color);
         Some(Self {
             mode,
             thickness,
@@ -150,6 +193,29 @@ impl Spec {
             scrolls,
             always: point(x == Some("scroll"), y == Some("scroll")),
         })
+    }
+
+    /// The spec for a virtual list. The list scrolls on y whatever the
+    /// overflow words say, so only the `scrollbar-*` words of the style
+    /// count, and a missing style takes the defaults.
+    pub(crate) fn for_list(
+        style: Option<&StyleDesc>,
+        mode: Mode,
+        color: &dyn Fn(&str) -> Option<Hsla>,
+    ) -> Self {
+        let (thickness, gutter, thumb, track) = match style {
+            Some(style) => bar_words(style, color),
+            None => (Thickness::Auto, Gutter::Auto, None, None),
+        };
+        Self {
+            mode,
+            thickness,
+            gutter,
+            thumb,
+            track,
+            scrolls: point(false, true),
+            always: point(false, false),
+        }
     }
 
     /// The width of a classic gutter, or zero for overlay bars and
@@ -229,6 +295,30 @@ enum ThumbLook {
     Rest,
     Hovered,
     Dragged,
+}
+
+/// The `scrollbar-width`, `scrollbar-gutter` and `scrollbar-color`
+/// words of a style, parsed.
+fn bar_words(
+    style: &StyleDesc,
+    color: &dyn Fn(&str) -> Option<Hsla>,
+) -> (Thickness, Gutter, Option<Hsla>, Option<Hsla>) {
+    let thickness = match style.scrollbar_width.as_deref().map(str::trim) {
+        Some("thin") => Thickness::Thin,
+        Some("none") => Thickness::None,
+        _ => Thickness::Auto,
+    };
+    let gutter = match style.scrollbar_gutter.as_deref().map(str::trim) {
+        Some("stable") => Gutter::Stable,
+        Some("stable both-edges") | Some("both-edges stable") => Gutter::StableBothEdges,
+        _ => Gutter::Auto,
+    };
+    let (thumb, track) = style
+        .scrollbar_color
+        .as_deref()
+        .map(|value| scrollbar_colors(value, color))
+        .unwrap_or((None, None));
+    (thickness, gutter, thumb, track)
 }
 
 /// `scrollbar-color: <thumb> <track>`, or `auto`.
@@ -343,7 +433,7 @@ pub(crate) struct Scrollbar {
 impl Scrollbar {
     pub(crate) fn new(
         spec: Spec,
-        handle: ScrollHandle,
+        source: ScrollSource,
         state: Rc<RefCell<State>>,
         now: Instant,
     ) -> Self {
@@ -351,7 +441,7 @@ impl Scrollbar {
             bar: Some(
                 Bar {
                     spec,
-                    handle,
+                    source,
                     state,
                     now,
                 }
@@ -413,7 +503,7 @@ impl Element for Scrollbar {
 /// The bar itself: the strips, the thumbs and the mouse handling.
 struct Bar {
     spec: Spec,
-    handle: ScrollHandle,
+    source: ScrollSource,
     state: Rc<RefCell<State>>,
     now: Instant,
 }
@@ -453,9 +543,9 @@ impl Bar {
     /// The parts of the bar on `axis`, given whether the other axis also
     /// shows one and takes the corner.
     fn geometry(&self, axis: Axis, other_shows: bool, hovered: bool) -> Geometry {
-        let bounds = self.handle.bounds();
-        let offset = self.handle.offset();
-        let max_offset = self.handle.max_offset();
+        let bounds = self.source.bounds();
+        let offset = self.source.offset();
+        let max_offset = self.source.max_offset();
         let strip_thickness = self.spec.strip_thickness();
         let thumb_thickness = self.spec.thumb_thickness(hovered);
         // Where the thumb sits across the axis. Classic thumbs centre in
@@ -533,16 +623,16 @@ impl Bar {
 /// is clamped by the box at its next prepaint.
 fn register_mouse(
     bars: Vec<Geometry>,
-    handle: ScrollHandle,
+    source: ScrollSource,
     state: Rc<RefCell<State>>,
     window: &mut Window,
 ) {
-    let viewport = handle.bounds();
+    let viewport = source.bounds();
     let strips: Vec<(Axis, Bounds<Pixels>)> = bars.iter().map(|g| (g.axis, g.strip)).collect();
 
     // Take hold of a thumb, or jump a page on a click in the track.
     let down_bars = bars.clone();
-    let down_handle = handle.clone();
+    let down_source = source.clone();
     let down_state = state.clone();
     window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
         if !phase.bubble() || event.button != MouseButton::Left {
@@ -553,13 +643,14 @@ fn register_mouse(
                 continue;
             }
             let along = event.position.along(bar.axis);
-            let offset = down_handle.offset();
+            let offset = down_source.offset();
             if let Some(thumb) = bar.thumb.filter(|thumb| thumb.contains(&event.position)) {
+                down_source.drag_started();
                 down_state.borrow_mut().drag =
                     Some((bar.axis, along - thumb.origin.along(bar.axis)));
             } else if let Some(thumb) = bar.thumb {
                 let page = viewport.size.along(bar.axis) * 0.9;
-                let max = down_handle.max_offset().along(bar.axis);
+                let max = down_source.max_offset().along(bar.axis);
                 let current = offset.along(bar.axis);
                 let next = if along < thumb.origin.along(bar.axis) {
                     current + page
@@ -567,7 +658,7 @@ fn register_mouse(
                     current - page
                 };
                 let offset = offset.apply_along(bar.axis, |_| next.clamp(-max, px(0.0)));
-                down_handle.set_offset(offset);
+                down_source.set_offset(offset);
             }
             cx.stop_propagation();
             window.refresh();
@@ -578,7 +669,7 @@ fn register_mouse(
     // Move the thumb, and notice the mouse coming onto or leaving a strip.
     let move_bars = bars;
     let move_strips = strips.clone();
-    let move_handle = handle.clone();
+    let move_source = source.clone();
     let move_state = state.clone();
     window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, _cx| {
         if !phase.bubble() {
@@ -588,11 +679,11 @@ fn register_mouse(
         if let Some((axis, grab)) = drag {
             if let Some(bar) = move_bars.iter().find(|bar| bar.axis == axis) {
                 let start = event.position.along(axis) - grab;
-                let max = move_handle.max_offset().along(axis);
-                let offset = move_handle
+                let max = move_source.max_offset().along(axis);
+                let offset = move_source
                     .offset()
                     .apply_along(axis, |_| bar.offset_for_thumb_start(start, max));
-                move_handle.set_offset(offset);
+                move_source.set_offset(offset);
                 window.refresh();
             }
             return;
@@ -612,6 +703,7 @@ fn register_mouse(
         if phase.bubble() && event.button == MouseButton::Left {
             let mut state = state.borrow_mut();
             if state.drag.take().is_some() {
+                source.drag_ended();
                 state.hovered = strips
                     .iter()
                     .find(|(_, strip)| strip.contains(&event.position))
@@ -660,10 +752,10 @@ impl Element for Bar {
         window: &mut Window,
         _cx: &mut App,
     ) {
-        // The box set its bounds and max offset on the handle just before
+        // The box set its bounds and max offset on the source just before
         // its children prepaint, so they are this frame's.
-        let offset = self.handle.offset();
-        let max_offset = self.handle.max_offset();
+        let offset = self.source.offset();
+        let max_offset = self.source.max_offset();
         let mut state = self.state.borrow_mut();
         if state.last_offset.is_some_and(|last| last != offset) {
             state.last_scroll = Some(self.now);
@@ -752,7 +844,7 @@ impl Element for Bar {
         // The square where two classic bars meet, in the track colour,
         // as a browser paints it.
         if self.spec.mode == Mode::Classic && shows.x && shows.y {
-            let bounds = self.handle.bounds();
+            let bounds = self.source.bounds();
             let thickness = self.spec.strip_thickness();
             let corner = Bounds::new(
                 point(bounds.right() - thickness, bounds.bottom() - thickness),
@@ -762,12 +854,106 @@ impl Element for Bar {
         }
         drop(state);
         if !bars.is_empty() {
-            register_mouse(bars, self.handle.clone(), self.state.clone(), window);
+            register_mouse(bars, self.source.clone(), self.state.clone(), window);
         }
     }
 }
 
 impl IntoElement for Scrollbar {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+/// A virtual list with its bar. `gpui::list` takes no children, so the
+/// `Scrollbar` child of the div path cannot ride inside it. This wrapper
+/// takes the layout of the list itself and defers the bar over it.
+pub(crate) struct ListScrollbar {
+    list: gpui::AnyElement,
+    bar: Option<gpui::AnyElement>,
+}
+
+impl ListScrollbar {
+    pub(crate) fn new(
+        list: gpui::AnyElement,
+        spec: Spec,
+        list_state: gpui::ListState,
+        state: Rc<RefCell<State>>,
+        now: Instant,
+    ) -> Self {
+        Self {
+            list,
+            bar: Some(
+                Bar {
+                    spec,
+                    source: ScrollSource::List(list_state),
+                    state,
+                    now,
+                }
+                .into_any_element(),
+            ),
+        }
+    }
+}
+
+impl Element for ListScrollbar {
+    type RequestLayoutState = ();
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        None
+    }
+
+    fn source_location(&self) -> Option<&'static core::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, ()) {
+        (self.list.request_layout(window, cx), ())
+    }
+
+    fn prepaint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.list.prepaint(window, cx);
+        // The bar takes no layout space, so it lays out as its own root,
+        // the way a tooltip does. A deferred element must have its layout
+        // before the deferred round prepaints it.
+        let mut bar = self.bar.take().unwrap();
+        bar.layout_as_root(gpui::AvailableSpace::min_size(), window, cx);
+        let mask = window.content_mask();
+        window.defer_draw(bar, window.element_offset(), 0, Some(mask));
+    }
+
+    fn paint(
+        &mut self,
+        _id: Option<&GlobalElementId>,
+        _inspector_id: Option<&InspectorElementId>,
+        _bounds: Bounds<Pixels>,
+        _request_layout: &mut (),
+        _prepaint: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.list.paint(window, cx);
+    }
+}
+
+impl IntoElement for ListScrollbar {
     type Element = Self;
 
     fn into_element(self) -> Self {
