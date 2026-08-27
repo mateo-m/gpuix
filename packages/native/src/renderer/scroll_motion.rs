@@ -123,6 +123,9 @@ struct Gesture {
     /// The fingers lifted and a snap glide runs. The OS keeps sending
     /// momentum events, and they are consumed so they cannot cancel it.
     coasting: bool,
+    /// When the last consumed momentum event came in. The stream sends an
+    /// event every few milliseconds, so a long gap means it ended.
+    last_momentum: Instant,
 }
 
 /// A fling travels about this long at its lift velocity before the OS
@@ -138,6 +141,9 @@ const FLING_RATIO: f64 = 0.92;
 const FLING_FRAME_SECONDS: f64 = 0.016;
 /// No fling glide runs longer than this, whatever the distance says.
 const FLING_MAX_SECONDS: f64 = 3.0;
+/// A gap in the momentum stream longer than this ends it. The OS sends a
+/// momentum event every few milliseconds while the stream runs.
+const MOMENTUM_GAP_SECONDS: f64 = 0.1;
 
 thread_local! {
     static ANIMATIONS: RefCell<HashMap<u64, Animation>> = RefCell::new(HashMap::new());
@@ -177,6 +183,7 @@ pub(crate) fn gesture_wheel(
                         from: handle.offset(),
                         down: true,
                         coasting: false,
+                        last_momentum: now,
                     },
                 );
                 false
@@ -195,7 +202,14 @@ pub(crate) fn gesture_wheel(
                     return false;
                 }
                 if gesture.coasting {
-                    if ANIMATIONS.with(|cell| cell.borrow().contains_key(&id)) {
+                    // Chromium consumes the momentum stream while its snap
+                    // fling is active and after it lands, until the next
+                    // gesture begin. Without the second part, the tail of
+                    // the stream pushes the box off the snap position the
+                    // moment the glide ends. The stream is continuous, so
+                    // a long gap means it ended and this wheel is new.
+                    if (now - gesture.last_momentum).as_secs_f64() <= MOMENTUM_GAP_SECONDS {
+                        gesture.last_momentum = now;
                         return true;
                     }
                     gesture.coasting = false;
@@ -221,6 +235,7 @@ pub(crate) fn gesture_wheel(
                     if target != handle.offset() {
                         animate_fling(id, handle, target);
                         gesture.coasting = true;
+                        gesture.last_momentum = now;
                     }
                 }
                 false

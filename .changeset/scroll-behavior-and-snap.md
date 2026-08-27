@@ -73,3 +73,9 @@ the frame before it covered, so the glide starts fast and slows down
 like momentum, and a longer distance takes more time. A new touch on
 the box stops a running glide at once. Programmatic smooth scrolls keep
 the 300ms `easeInOut` glide.
+
+The box consumes the whole momentum stream after a fling, not only the
+part that overlaps the glide. The stream outlives a short glide by a
+second or more, and the tail pushed the box off the snap position the
+moment the glide ended. A gap of more than 100ms ends the stream, so a
+later mouse wheel still scrolls.

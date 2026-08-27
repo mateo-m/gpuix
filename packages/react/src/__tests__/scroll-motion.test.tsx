@@ -179,6 +179,32 @@ describeNative("scroll snap", () => {
     expect(offsetY(id)).toBe(-300)
   })
 
+  it("the momentum tail after the glide lands cannot move the box", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    const at = fling(id, 4, -5)
+    root.renderer.flush()
+    // The glide runs about 0.62s, and the OS stream keeps sending an
+    // event every 16ms well past the landing. Chromium consumes the
+    // whole stream until the next gesture begin, so the tail cannot
+    // push the box off the snap position.
+    for (let i = 0; i < 50; i++) {
+      root.renderer.clockFastForward(16)
+      root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, -30, undefined, "moved")
+      root.renderer.flush()
+    }
+    expect(offsetY(id)).toBe(-300)
+    // A gap of more than 100ms ends the stream, so the next phaseless
+    // wheel is a new scroll and moves the box.
+    root.renderer.clockFastForward(200)
+    root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, -30, undefined, "moved")
+    root.renderer.flush()
+    expect(offsetY(id)).toBe(-330)
+  })
+
   it("the fling glide decays like momentum, not like a fixed ease", () => {
     const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
     root.render(
