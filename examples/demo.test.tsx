@@ -242,6 +242,36 @@ describeNative("the scrollbars panel", () => {
     expect(rowY - boxY).toBeLessThanOrEqual(30)
     test.unmount()
   })
+
+  it("the two-axes box scrolls both ways at the real page width", () => {
+    const test = root()
+    test.render(
+      <div
+        style={{
+          ...BASE,
+          ...PALETTES.midnight,
+          width: "100%",
+          height: "100%",
+          padding: 16,
+          overflowY: "scroll",
+          backgroundColor: "var(--color-bg)",
+        }}
+      >
+        <Scrollbars />
+      </div>
+    )
+    const box = test.renderer.findByTestId("two-axes-box")!
+    const [x, y, width] = test.renderer.getElementBounds(box.id)!
+    // The content must be wider than the box even on a wide window.
+    const inner = test.renderer.findByTestId("two-axes-inner")!
+    expect(test.renderer.getElementBounds(inner.id)![2]).toBeGreaterThan(width)
+    test.renderer.nativeSimulateScrollWheel(x + 40, y + 40, -60, -60)
+    test.renderer.flush()
+    const offset = test.renderer.getScrollOffset(box.id)!
+    expect(offset[0]).toBeLessThan(0)
+    expect(offset[1]).toBeLessThan(0)
+    test.unmount()
+  })
 })
 
 describeNative("the navigation panel", () => {
