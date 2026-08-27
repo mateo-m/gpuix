@@ -53,6 +53,13 @@ way every other colour property does.
 Snap fires sooner: the idle window is 80ms, and the sub-pixel tail of a
 wheel no longer resets it, so the glide starts while the wheel coasts.
 
+`<virtual-list>` paints a scrollbar. The bar reads the list state for
+the offset and the measured content height, so the thumb length settles
+as rows measure. A classic bar reserves its gutter as right padding, and
+the rows shrink by it. `scrollbar-width`, `scrollbar-gutter` and
+`scrollbar-color` on the list apply as on a div. The list also lays its
+rows out inside horizontal padding now, which it ignored before.
+
 A trackpad fling snaps the moment the fingers lift, as a browser does.
 The box predicts the landing point from the last 100ms of wheel deltas,
 picks the snap position for that landing, and glides straight to it. The

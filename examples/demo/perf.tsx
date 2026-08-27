@@ -127,7 +127,9 @@ function Frames({ renderer }: { renderer: FrameOverlay }) {
 
 const ROWS = 5000
 /// Rows built around the visible range, so a scroll never waits for React.
-const OVERDRAW_ROWS = 12
+/// A fast fling covers about a thousand pixels before React commits the
+/// next window, so the overdraw is 30 rows (about 1000px) per side.
+const OVERDRAW_ROWS = 30
 
 /// Windowing is the app's job: the list reports the visible range, and this
 /// component renders that slice plus an overdraw. `windowStart` tells the
