@@ -90,3 +90,9 @@ the lift, not at the offset where the fingers went down. An `always`
 area the drag already passed pulled the box backward at the lift, and
 the consumed momentum stream then held it there. Blink measures the
 fling from its start point, and now GPUIX does too.
+
+The lift now asks the window for a paint. The glide moves one step per
+painted frame, and the consumed momentum events after the lift schedule
+no paint of their own, so without this first frame the glide sat inert
+and the fling stopped dead at the lift. `GPUIX_SNAP_DEBUG=1` logs the
+gesture stream, the landing prediction and each glide step.
