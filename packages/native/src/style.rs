@@ -505,31 +505,52 @@ style_desc! {
     // Pseudo-selector styles, applied by GPUI natively (no JS round-trip).
     // Uses Box to avoid infinite-size struct (StyleDesc contains StyleDesc).
     //
-    // These two are the only conditions `style` carries, and they are here for
-    // history. A CSS `style` attribute holds declarations, not selectors. Any
-    // further condition belongs in a class, not here.
+    // These two named fields are here for history. A CSS `style` attribute
+    // holds declarations, not selectors, so the style prop gets no further
+    // condition. A class resolver sends every other condition through
+    // `selectors` below.
     hover: Option<Box<StyleDesc>> = "hover",
     active: Option<Box<StyleDesc>> = "active",
+
+    // Conditioned blocks from a class resolver. The `style` prop type does
+    // not carry this field, because a style attribute cannot hold a selector.
+    selectors: Option<Vec<SelectorRule>> = "selectors",
 }
 
 pub use crate::color::{parse_color, parse_color_hex};
+
+/// One conditioned block from a class resolver.
+///
+/// `on` is a canonical selector spelling, and `Selector::parse` names the
+/// closed set. An entry with a spelling outside it warns once and drops.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct SelectorRule {
+    pub on: String,
+    pub style: Box<StyleDesc>,
+}
 
 impl StyleDesc {
     /// The state blocks this style declares, in specification order.
     ///
     /// This is the one place that knows the `style` prop spells its states as
-    /// named fields. When the class channel lands, states arrive as parsed
-    /// selectors instead, and only this function changes.
+    /// named fields. The class channel sends states as parsed selectors in
+    /// `selectors`, and those follow the named fields here.
     pub(crate) fn states(
         &self,
     ) -> impl Iterator<Item = (crate::style::resolve::State, &StyleDesc)> {
-        use crate::style::resolve::State;
+        use crate::style::resolve::{Selector, State};
         [
             (State::Hover, self.hover.as_deref()),
             (State::Active, self.active.as_deref()),
         ]
         .into_iter()
         .filter_map(|(state, declared)| declared.map(|declared| (state, declared)))
+        .chain(self.selectors.iter().flatten().filter_map(|rule| {
+            match Selector::parse(&rule.on) {
+                Some(Selector::State(state)) => Some((state, rule.style.as_ref())),
+                _ => None,
+            }
+        }))
     }
 }
 
@@ -619,6 +640,15 @@ mod tests {
     #[test]
     fn invalid_fill_keeps_conservative_occlusion() {
         assert!(should_occlude(&with_fill("not-a-color")));
+    }
+
+    #[test]
+    fn selectors_read_from_json() {
+        let json = r#"{ "selectors": [{ "on": ":first-child", "style": { "color": "red" } }] }"#;
+        let style: StyleDesc = serde_json::from_str(json).unwrap();
+        let rules = style.selectors.unwrap();
+        assert_eq!(rules[0].on, ":first-child");
+        assert_eq!(rules[0].style.color.as_deref(), Some("red"));
     }
 
     #[test]
