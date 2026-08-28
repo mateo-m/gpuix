@@ -264,14 +264,28 @@ const REMAP_BASE: u64 = 1 << 62;
 /// Building both under one id would hand them one GPUI element state.
 /// A clone of a destroyed element keeps its id, and with it its scroll
 /// offsets, which is the common pair case.
+///
+/// React removes an old subtree in two steps: the commit unlinks it from
+/// its parent, and a later batch destroys each element. An element that
+/// hangs detached at start time never paints again, so it counts as
+/// destroyed here. Only an id that still sits under the root collides.
 fn remap_live_ids(captures: &mut HashMap<String, VtCapture>, live: &RetainedTree, next: &mut u64) {
+    let mut attached = HashSet::new();
+    let mut stack: Vec<u64> = live.root_id.into_iter().collect();
+    while let Some(id) = stack.pop() {
+        if attached.insert(id) {
+            if let Some(element) = live.elements.get(&id) {
+                stack.extend(element.children.iter().copied());
+            }
+        }
+    }
     for capture in captures.values_mut() {
         let colliding: Vec<u64> = capture
             .tree
             .elements
             .keys()
             .copied()
-            .filter(|id| live.elements.contains_key(id))
+            .filter(|id| attached.contains(id))
             .collect();
         for from in colliding {
             let to = *next;
