@@ -185,6 +185,46 @@ describeNative("view transitions", () => {
     expect(boundsOf(id)![3]).toBeCloseTo(100, 0)
   })
 
+  it("keeps the scroll offset of a scrolled screen in its frozen copy", () => {
+    // The web keeps it too: the old snapshot is an image of the painted
+    // pixels, so the scroll position is baked in. Here the copy repaints
+    // through the live pipeline, so it must reuse the scroll handle of
+    // the destroyed screen. A frame can build between the capture and
+    // the start call, and without care that frame drops the handle.
+    const rows = (label: string) => {
+      const items = []
+      for (let i = 0; i < 20; i++) {
+        items.push(
+          <div key={i} style={{ width: "100%", height: 40, flexShrink: 0 }}>
+            <text>{`${label} ${i}`}</text>
+          </div>
+        )
+      }
+      return items
+    }
+    const screen = (label: string) => (
+      <div
+        key={label}
+        testId={`screen-${label}`}
+        style={{ width: 300, height: 200, overflowY: "scroll", viewTransitionName: "screen" }}
+      >
+        {rows(label)}
+      </div>
+    )
+    const { render, renderer } = root
+    renderer.clockPause()
+    render(screen("A"))
+    const scrolled = renderer.findByTestId("screen-A")!
+    const rowId = scrolled.children[0]!
+    renderer.scrollTo(scrolled.id, 0, -120, "instant")
+    expect(boundsOf(rowId)![1]).toBeCloseTo(-120, 0)
+
+    startViewTransition(renderer, () => render(screen("B")), PUSH)
+    renderer.clockFastForward(16)
+    // The first row of the frozen copy still paints 120 above the top.
+    expect(boundsOf(rowId)![1]).toBeCloseTo(-120, 0)
+  })
+
   it("runs the update alone on a renderer without the native methods", () => {
     let ran = false
     const bare = {} as Parameters<typeof startViewTransition>[0]
