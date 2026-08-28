@@ -217,11 +217,16 @@ function Phone({ renderer }: { renderer: NativeRenderer | null }) {
   /// The saved scroll offset of each screen, by its key.
   const offsets = useRef(new Map<string, [number, number]>())
   const go = (next: "root" | "general", options: ViewTransitionOptions) => {
+    const leaving = screen
     if (renderer) {
       startViewTransition(renderer, () => setScreen(next), options)
     } else {
       setScreen(next)
     }
+    // iOS restores the scroll position of a screen you go back to, and
+    // only that one. A pop throws its screen away, so a later push of
+    // the same screen starts at the top.
+    if (options === POP) offsets.current.delete(leaving)
   }
 
   return (
