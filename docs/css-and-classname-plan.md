@@ -768,12 +768,23 @@ appearance and clear it when the value flips.
 `space-x-*` and `divide-*` produce `:where(& > :not(:last-child))`, and `*:` produces
 `& > *`. The class sits on the parent, and the declarations apply to the children.
 
-`Condition::Children { except_last: bool }` holds them on the parent. The walk already
-carries an environment down the tree (`Inherited`). The parent pushes the refinement there,
-and each child that matches merges it before its own refinement. `:where()` has specificity
-zero, so the child's own declarations must win, and this merge order gives exactly that.
-`**:` targets every descendant, so its refinement stays in the environment for the whole
-subtree.
+The rules cross the FFI in one wire field. `StyleDesc` gains `selectors`, a list of
+`{ on, style }` pairs, and the resolver is its only writer. The `style` prop type excludes
+it. The spellings form a closed set: `:first-child`, `:last-child`, `:nth-child(odd)`,
+`:nth-child(even)`, `:only-child`, `& > *`, `& > :not(:last-child)` and `& *`. An unknown
+spelling warns once and drops.
+
+The rules for the children ride in the walk context (`BuildCtx`), not in `Inherited`.
+`Inherited` keys the resolution cache by pointer, so a refinement that changes per parent
+would clear the cache of every child on every frame. The walk context costs nothing there,
+because the rules apply at paint and never touch a cached resolution. Direct rules reach
+one level and swap out at each depth. Descendant rules stack for the whole subtree. A rule
+applies before the child's own declarations. `:where()` has specificity zero, so the
+child's own declarations must win, and this order gives exactly that.
+
+Two places sit outside the walk. A virtual-list row builds on its own, so it has no child
+position and the index conditions do not apply to it. A custom element resolves its own
+`StyleDesc`, so the rules of a parent stop at its border.
 
 ### What still drops, and why
 
