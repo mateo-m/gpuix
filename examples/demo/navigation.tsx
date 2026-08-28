@@ -105,10 +105,13 @@ function Header({ screen, onBack }: {
           right: 0,
           height: HEADER_HEIGHT + BLUR_TAIL,
           backdropFilter: "blur(16px)",
-          // The fade starts high, so the blur is weak where the first row
-          // rests. A fade from the middle kept the blur near 75% strength
-          // there, and the hover colour of the row smeared up into the bar.
-          maskImage: "linear-gradient(to bottom, black 25%, ease-in-out, transparent)",
+          // The eye reads blur on a log scale: sigma 4 and sigma 16 both
+          // look like mush on small text, so a linear fade of the sigma
+          // spends most of the strip on the same look. These stops halve
+          // the sigma at even distances, so every span of the strip shows
+          // the same visible change.
+          maskImage:
+            "linear-gradient(to bottom, black, rgba(0,0,0,0.5) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.125) 45%, rgba(0,0,0,0.06) 60%, transparent 85%)",
           pointerEvents: "none",
         }}
       />

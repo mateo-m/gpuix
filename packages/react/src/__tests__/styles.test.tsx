@@ -2158,6 +2158,62 @@ describeNative("motion", () => {
     }
   })
 
+  it("keeps the full blur at the top edge of a masked strip", () => {
+    const { render, renderer } = createTestRoot()
+    const cells = []
+    for (let i = 0; i < 16; i++) {
+      cells.push(
+        <div
+          key={i}
+          style={{
+            width: 16,
+            height: "100%",
+            backgroundColor: i % 2 === 0 ? "#000000" : "#ffffff",
+          }}
+        />
+      )
+    }
+    // The strip starts below the window top, so sharp rows sit above it.
+    // The blur passes also blur the pad around the strip. When the pad
+    // above gets a mask of zero, it stays sharp, and the vertical pass
+    // mixes that sharpness back into the top rows of the strip. The mask
+    // read must clamp to the bounds of the layer instead.
+    render(
+      <div style={{ position: "relative", width: 256, height: 240 }}>
+        <div style={{ display: "flex", flexDirection: "row", width: 256, height: 240 }}>
+          {cells}
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 40,
+            width: 256,
+            height: 84,
+            backdropFilter: "blur(16px)",
+            maskImage: "linear-gradient(to bottom, black 25%, ease-in-out, transparent)",
+          }}
+        />
+      </div>
+    )
+    const contrast = (y: number) => {
+      let total = 0
+      for (const k of [2, 3, 4]) {
+        const black = renderer.pixelAt(8 + 32 * k, y)[0]
+        const white = renderer.pixelAt(24 + 32 * k, y)[0]
+        total += white - black
+      }
+      return total / 3
+    }
+    // Above the strip the stripes stay sharp.
+    expect(contrast(30)).toBeGreaterThan(240)
+    // Just inside the strip the mask is one, so the blur is at full
+    // width. With the sharp bleed from above, this row reads near 97.
+    expect(contrast(45)).toBeLessThan(15)
+    // Below the strip the stripes stay sharp.
+    expect(contrast(135)).toBeGreaterThan(240)
+  })
+
   it("cuts corners to the declared shape", () => {
     const { render, renderer } = createTestRoot()
     const box = { width: 100, height: 100, backgroundColor: "#ff0000" }
