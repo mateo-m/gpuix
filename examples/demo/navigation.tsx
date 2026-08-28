@@ -4,9 +4,9 @@
 /// in the transition. The back button enters and leaves through a blur and
 /// opacity pair. The title of each screen carries the name "nav-title", so
 /// the old text blurs and fades out in place while the new text sharpens in,
-/// a text morph. The screens slide under the header as a pair, and a
-/// backdrop blur with an eased mask blurs the rows progressively where they
-/// pass under it.
+/// a text morph. The screens slide under the header as a pair, under the
+/// soft scroll edge effect of iOS 26: a variable backdrop blur with a
+/// saturation lift on the same mask, under a scrim in the panel colour.
 
 import React, { useState } from "react"
 import { startViewTransition, useGpuix } from "@gpuix/react"
@@ -86,10 +86,16 @@ function NavRow({ label, detail, onClick }: {
   )
 }
 
-/// The header that never unmounts. The first layer is the progressive blur:
-/// a backdrop blur whose eased mask fades it out past the bar, so the rows
-/// blur where they pass under it. The title and the back button sit on top
-/// of that layer, and each carries its own view transition name.
+/// The header that never unmounts, built as the soft scroll edge effect
+/// of iOS 26. Two layers make the effect. The first is a variable backdrop
+/// blur with a saturation and contrast lift, and the colour matrix rides
+/// the same mask as the blur. The mask holds full width behind the bar and
+/// then falls off on a log scale, so every span of the tail shows the same
+/// visible change. The second is a gradient scrim. iOS reads the scrim
+/// colour from the content under the bar, which the engine cannot do, so
+/// the scrim takes the colour of the panel, the surface the rows scroll
+/// on. The title and the back button sit on top, and each carries its own
+/// view transition name.
 function Header({ screen, onBack }: {
   screen: "root" | "general"
   onBack: () => void
@@ -104,14 +110,25 @@ function Header({ screen, onBack }: {
           left: 0,
           right: 0,
           height: HEADER_HEIGHT + BLUR_TAIL,
-          backdropFilter: "blur(16px)",
-          // The eye reads blur on a log scale: sigma 4 and sigma 16 both
+          backdropFilter: "blur(16px) saturate(1.8) contrast(1.05)",
+          // The eye reads blur on a log scale. Sigma 4 and sigma 16 both
           // look like mush on small text, so a linear fade of the sigma
-          // spends most of the strip on the same look. These stops halve
-          // the sigma at even distances, so every span of the strip shows
-          // the same visible change.
+          // spends most of the strip on the same look. The stops after
+          // the hold halve the sigma at even distances.
           maskImage:
-            "linear-gradient(to bottom, black, rgba(0,0,0,0.5) 15%, rgba(0,0,0,0.25) 30%, rgba(0,0,0,0.125) 45%, rgba(0,0,0,0.06) 60%, transparent 85%)",
+            "linear-gradient(to bottom, black 40%, rgba(0,0,0,0.5) 55%, rgba(0,0,0,0.25) 68%, rgba(0,0,0,0.125) 79%, rgba(0,0,0,0.06) 89%, transparent)",
+          pointerEvents: "none",
+        }}
+      />
+      <div
+        style={{
+          position: "absolute",
+          top: 0,
+          left: 0,
+          right: 0,
+          height: HEADER_HEIGHT + BLUR_TAIL,
+          backgroundImage:
+            "linear-gradient(to bottom, color-mix(in srgb, var(--color-panel) 72%, transparent), ease-in-out, transparent)",
           pointerEvents: "none",
         }}
       />
@@ -218,7 +235,7 @@ export function Navigation() {
   return (
     <Panel
       title="View transitions"
-      note="Click General to push its screen. The screens slide as a pair under a header that never unmounts. The back button enters through a blur and opacity pair and leaves the same way, and the title morphs between Settings and General. The strip under the header is a backdrop blur with an eased mask, so the rows blur progressively as they scroll under it."
+      note="Click General to push its screen. The screens slide as a pair under a header that never unmounts. The back button enters through a blur and opacity pair and leaves the same way, and the title morphs between Settings and General. The strip under the header is the soft scroll edge effect of iOS 26: a variable backdrop blur plus a saturation lift on one mask, under a scrim in the panel colour."
     >
       <Phone renderer={renderer ?? null} />
     </Panel>
