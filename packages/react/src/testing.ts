@@ -30,6 +30,14 @@ export type { MacCpuThrottle } from "./cpu-throttle.js"
 interface NativeTestRendererApi extends NativeRenderer {
   applyBatch(json: string): number[]
   flush(): void
+  simulateScrollWheelProbe(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+    phase?: string
+  ): boolean
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
@@ -238,6 +246,22 @@ export class TestRenderer implements NativeRenderer {
   flush(): void {
     syncEnvOverrides()
     this.native.flush()
+  }
+
+  /** Dispatch a wheel event and report whether it left the window
+   *  asking for a paint. The live window only paints when something
+   *  asks, so a lift that asks for nothing freezes the snap glide.
+   *  `nativeSimulateScrollWheel` paints on demand and clears the mark,
+   *  so it cannot catch a lost frame request. */
+  nativeSimulateScrollWheelProbe(
+    x: number,
+    y: number,
+    deltaX: number,
+    deltaY: number,
+    modifiers?: string,
+    phase?: "started" | "moved" | "ended"
+  ): boolean {
+    return this.native.simulateScrollWheelProbe(x, y, deltaX, deltaY, modifiers, phase)
   }
 
   /** Drain events collected by the native GPUI event handlers. */

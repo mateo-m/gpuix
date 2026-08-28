@@ -383,6 +383,47 @@ impl TestGpuixRenderer {
         })
     }
 
+    /// Dispatch a scroll wheel event and report whether the dispatch left
+    /// the window asking for a paint. The live window only paints when
+    /// something asks, so a lift that asks for no paint freezes the snap
+    /// glide, which moves one step per painted frame. The harness cannot
+    /// catch that through `simulateScrollWheel`: it parks the executor,
+    /// which paints on demand and clears the mark. This method reads the
+    /// mark right after the dispatch, before any paint.
+    #[napi]
+    pub fn simulate_scroll_wheel_probe(
+        &self,
+        x: f64,
+        y: f64,
+        delta_x: f64,
+        delta_y: f64,
+        modifiers: Option<String>,
+        phase: Option<String>,
+    ) -> Result<bool> {
+        let modifiers = crate::automation::parse_modifiers(modifiers.as_deref());
+        let touch_phase = match phase.as_deref().map(str::trim) {
+            Some("started") => gpui::TouchPhase::Started,
+            Some("ended") => gpui::TouchPhase::Ended,
+            _ => gpui::TouchPhase::Moved,
+        };
+        let event = gpui::ScrollWheelEvent {
+            position: gpui::point(gpui::px(x as f32), gpui::px(y as f32)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(
+                gpui::px(delta_x as f32),
+                gpui::px(delta_y as f32),
+            )),
+            modifiers,
+            touch_phase,
+        };
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| {
+                window.dispatch_event(gpui::PlatformInput::ScrollWheel(event), app);
+                window.needs_paint()
+            })
+            .map_err(|e| Error::from_reason(e.to_string()))
+        })
+    }
+
     /// Simulate a click at the given window coordinates.
     /// Dispatches MouseDown + MouseUp through GPUI's input pipeline,
     /// which triggers the same event handlers as production.
