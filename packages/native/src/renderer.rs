@@ -1563,13 +1563,18 @@ impl GpuixRenderer {
             };
             SCROLL_HANDLES.with(|cell| {
                 let handles = cell.borrow();
+                let to = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
                 if let Some(handle) = handles.get(&id) {
-                    let to = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
                     if smooth {
                         scroll_motion::animate(id, handle, to);
                     } else {
                         handle.set_offset(to);
                     }
+                } else {
+                    // The element has not painted yet, so it has no scroll
+                    // handle. The offset waits until the frame that creates
+                    // the handle, and applies in one step there.
+                    scroll_motion::defer(id, to);
                 }
             });
         }
@@ -2428,8 +2433,14 @@ impl WebGpuixRenderer {
             true
         }) {
             SCROLL_HANDLES.with(|handles| {
+                let to = gpui::point(gpui::px(x as f32), gpui::px(y as f32));
                 if let Some(handle) = handles.borrow().get(&id) {
-                    handle.set_offset(gpui::point(gpui::px(x as f32), gpui::px(y as f32)));
+                    handle.set_offset(to);
+                } else {
+                    // The element has not painted yet, so it has no scroll
+                    // handle. The offset waits until the frame that creates
+                    // the handle.
+                    scroll_motion::defer(id, to);
                 }
             });
         }
@@ -2925,13 +2936,18 @@ impl GpuixView {
             behavior.smooth(tree.elements.get(&id).and_then(|el| el.style.as_deref()))
         };
         SCROLL_HANDLES.with(|cell| {
+            let to = gpui::point(gpui::px(x), gpui::px(y));
             if let Some(handle) = cell.borrow().get(&id) {
-                let to = gpui::point(gpui::px(x), gpui::px(y));
                 if smooth {
                     scroll_motion::animate(id, handle, to);
                 } else {
                     handle.set_offset(to);
                 }
+            } else {
+                // The element has not painted yet, so it has no scroll
+                // handle. The offset waits until the frame that creates
+                // the handle, and applies in one step there.
+                scroll_motion::defer(id, to);
             }
         });
     }
