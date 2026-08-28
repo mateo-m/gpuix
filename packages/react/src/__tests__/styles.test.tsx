@@ -2214,6 +2214,67 @@ describeNative("motion", () => {
     expect(contrast(135)).toBeGreaterThan(240)
   })
 
+  it("scales the backdrop colour matrix with the mask", () => {
+    const { render, renderer } = createTestRoot()
+    // A soft scroll edge effect pairs the blur with a saturation change
+    // in one backdrop filter list. The colour matrix must ride the same
+    // mask as the blur. Over a solid red the blur changes nothing, so
+    // the green channel tells the weight of the matrix alone:
+    // saturate(0) turns the red into a grey with equal channels.
+    render(
+      <div style={{ position: "relative", width: 256, height: 240, backgroundColor: "#ff0000" }}>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 256,
+            height: 168,
+            backdropFilter: "blur(16px) saturate(0)",
+            maskImage: "linear-gradient(to bottom, black, transparent)",
+          }}
+        />
+      </div>
+    )
+    const at = (y: number) => renderer.pixelAt(128, y)
+    // Near the black end of the mask the red is almost fully grey.
+    expect(at(10)[1]).toBeGreaterThan(30)
+    expect(at(10)[0]).toBeLessThan(120)
+    // Near the clear end the red is almost untouched.
+    expect(at(160)[0]).toBeGreaterThan(230)
+    expect(at(160)[1]).toBeLessThan(25)
+    // The weight of the matrix falls with the mask.
+    expect(at(10)[1]).toBeGreaterThan(at(84)[1])
+    expect(at(84)[1]).toBeGreaterThan(at(160)[1])
+    // Below the strip the red stays pure.
+    expect(at(200)[0]).toBeGreaterThan(240)
+    expect(at(200)[1]).toBeLessThan(15)
+  })
+
+  it("parses a colour function as a gradient stop", () => {
+    const { render, renderer } = createTestRoot()
+    // The scrim of a scroll edge effect takes its colour from a
+    // `color-mix()` stop. The commas inside the function must not split
+    // the stop list, or the whole gradient drops.
+    render(
+      <div style={{ padding: 10 }}>
+        <div
+          style={{
+            width: 200,
+            height: 40,
+            backgroundColor: "#000000",
+            backgroundImage:
+              "linear-gradient(to right, color-mix(in srgb, #ff0000 72%, transparent), #0000ff)",
+          }}
+        />
+      </div>
+    )
+    // Red at 72 percent over the black at the left, blue at the right.
+    expect(renderer.pixelAt(12, 30)[0]).toBeGreaterThan(140)
+    expect(renderer.pixelAt(12, 30)[2]).toBeLessThan(80)
+    expect(renderer.pixelAt(208, 30)[2]).toBeGreaterThan(240)
+  })
+
   it("cuts corners to the declared shape", () => {
     const { render, renderer } = createTestRoot()
     const box = { width: 100, height: 100, backgroundColor: "#ff0000" }
