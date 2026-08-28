@@ -8,7 +8,7 @@
 /// soft scroll edge effect of iOS 26: a variable backdrop blur with a
 /// saturation lift on the same mask, under a scrim in the panel colour.
 
-import React, { useState } from "react"
+import React, { useLayoutEffect, useRef, useState } from "react"
 import { startViewTransition, useGpuix } from "@gpuix/react"
 import type { NativeRenderer, ViewTransitionOptions } from "@gpuix/react"
 import { Panel } from "./ui.js"
@@ -171,9 +171,34 @@ function Header({ screen, onBack }: {
 /// and the key makes React mount a new element instead of an update in
 /// place, the way a real navigation swaps components. The top padding puts
 /// the first row under the header, and the rows scroll under it.
-function Screen({ children }: { children: React.ReactNode }) {
+///
+/// iOS keeps the scroll position of a screen you go back to. The engine
+/// does not: a remounted screen starts at the top, as a keyed remount
+/// does on the web. The app restores it. The effect cleanup saves the
+/// offset when the screen unmounts, and the mount effect sets it back.
+/// A scrollTo this early is safe. When no frame has painted the screen
+/// yet, the engine holds the offset for the frame that creates its
+/// scroll state.
+function Screen({ id, renderer, offsets, children }: {
+  id: string
+  renderer: NativeRenderer | null
+  offsets: React.RefObject<Map<string, [number, number]>>
+  children: React.ReactNode
+}) {
+  const box = useRef<{ id: number } | null>(null)
+  useLayoutEffect(() => {
+    const el = box.current
+    if (!el || !renderer?.scrollTo || !renderer.getScrollOffset) return
+    const saved = offsets.current.get(id)
+    if (saved) renderer.scrollTo(el.id, saved[0], saved[1], "instant")
+    return () => {
+      const offset = renderer.getScrollOffset!(el.id)
+      if (offset) offsets.current.set(id, [offset[0]!, offset[1]!])
+    }
+  }, [])
   return (
     <div
+      ref={box}
       className="col w-full h-full"
       style={{
         viewTransitionName: "screen",
@@ -189,6 +214,8 @@ function Screen({ children }: { children: React.ReactNode }) {
 
 function Phone({ renderer }: { renderer: NativeRenderer | null }) {
   const [screen, setScreen] = useState<"root" | "general">("root")
+  /// The saved scroll offset of each screen, by its key.
+  const offsets = useRef(new Map<string, [number, number]>())
   const go = (next: "root" | "general", options: ViewTransitionOptions) => {
     if (renderer) {
       startViewTransition(renderer, () => setScreen(next), options)
@@ -209,7 +236,7 @@ function Phone({ renderer }: { renderer: NativeRenderer | null }) {
       }}
     >
       {screen === "root" ? (
-        <Screen key="root">
+        <Screen key="root" id="root" renderer={renderer} offsets={offsets}>
           {ROOT_ROWS.map((label) => (
             <NavRow
               key={label}
@@ -219,7 +246,7 @@ function Phone({ renderer }: { renderer: NativeRenderer | null }) {
           ))}
         </Screen>
       ) : (
-        <Screen key="general">
+        <Screen key="general" id="general" renderer={renderer} offsets={offsets}>
           {GENERAL_ROWS.map((label) => (
             <NavRow key={label} label={label} detail="" />
           ))}
@@ -235,7 +262,7 @@ export function Navigation() {
   return (
     <Panel
       title="View transitions"
-      note="Click General to push its screen. The screens slide as a pair under a header that never unmounts. The back button enters through a blur and opacity pair and leaves the same way, and the title morphs between Settings and General. The strip under the header is the soft scroll edge effect of iOS 26: a variable backdrop blur plus a saturation lift on one mask, under a scrim in the panel colour."
+      note="Click General to push its screen. The screens slide as a pair under a header that never unmounts. The back button enters through a blur and opacity pair and leaves the same way, and the title morphs between Settings and General. The strip under the header is the soft scroll edge effect of iOS 26: a variable backdrop blur plus a saturation lift on one mask, under a scrim in the panel colour. Scroll the list, push, and go back: the app saves the offset in JS and restores it, the way iOS does."
     >
       <Phone renderer={renderer ?? null} />
     </Panel>
