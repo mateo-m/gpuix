@@ -154,6 +154,48 @@ thread_local! {
     static SNAP: RefCell<HashMap<u64, SnapState>> = RefCell::new(HashMap::new());
     static INITIAL_DONE: RefCell<HashSet<u64>> = RefCell::new(HashSet::new());
     static GESTURES: RefCell<HashMap<u64, Gesture>> = RefCell::new(HashMap::new());
+    static DEFERRED: RefCell<HashMap<u64, Deferred>> = RefCell::new(HashMap::new());
+}
+
+/// An offset from a `scrollTo` that came before the first frame of its
+/// element. A mount effect runs in the commit that creates the element,
+/// before any frame builds a scroll handle for it. The offset waits here,
+/// and the handle starts at it instead of at zero. The web behaves the
+/// same way: a scroll set on a fresh element sticks.
+struct Deferred {
+    to: Point<Pixels>,
+    /// On some backends the scroll command can arrive one frame before
+    /// the batch that creates the element. The prune drops an entry only
+    /// after it saw the element missing twice.
+    seen_missing: bool,
+}
+
+/// Hold `to` for an element that has no scroll handle yet.
+pub(crate) fn defer(id: u64, to: Point<Pixels>) {
+    DEFERRED.with(|cell| {
+        cell.borrow_mut().insert(
+            id,
+            Deferred {
+                to,
+                seen_missing: false,
+            },
+        );
+    });
+}
+
+/// The held offset for a new scroll handle, if a `scrollTo` came before
+/// the first frame of its element.
+pub(crate) fn take_deferred(id: u64) -> Option<Point<Pixels>> {
+    DEFERRED.with(|cell| cell.borrow_mut().remove(&id).map(|deferred| deferred.to))
+}
+
+/// Drop the held offset of an element that painted without a scroll box.
+/// The web does the same: a scroll set on an element with no overflow
+/// does not persist.
+pub(crate) fn drop_deferred(id: u64) {
+    DEFERRED.with(|cell| {
+        cell.borrow_mut().remove(&id);
+    });
 }
 
 /// A wheel event over a snap container, seen in the capture phase before
@@ -405,6 +447,19 @@ fn prune(tree: &RetainedTree) {
     GESTURES.with(|cell| {
         cell.borrow_mut()
             .retain(|id, _| tree.elements.contains_key(id))
+    });
+    DEFERRED.with(|cell| {
+        cell.borrow_mut().retain(|id, deferred| {
+            if tree.elements.contains_key(id) {
+                deferred.seen_missing = false;
+                return true;
+            }
+            if deferred.seen_missing {
+                return false;
+            }
+            deferred.seen_missing = true;
+            true
+        })
     });
 }
 
@@ -950,5 +1005,51 @@ mod tests {
         );
         assert_eq!(snap_align(Some(&style("none"))), [None, None]);
         assert_eq!(snap_align(None), [None, None]);
+    }
+
+    fn tree_with(ids: &[u64]) -> RetainedTree {
+        let mut tree = RetainedTree::new();
+        for &id in ids {
+            tree.elements
+                .insert(id, crate::retained_tree::RetainedElement::new(id, "div".to_string(), 0));
+        }
+        tree
+    }
+
+    #[test]
+    fn a_deferred_offset_applies_once() {
+        defer(701, point(px(0.0), px(-150.0)));
+        assert_eq!(take_deferred(701), Some(point(px(0.0), px(-150.0))));
+        assert_eq!(take_deferred(701), None);
+    }
+
+    #[test]
+    fn a_dropped_deferred_offset_does_not_apply() {
+        defer(702, point(px(0.0), px(-150.0)));
+        drop_deferred(702);
+        assert_eq!(take_deferred(702), None);
+    }
+
+    #[test]
+    fn the_prune_gives_a_missing_element_one_frame_of_grace() {
+        // On some backends the scroll command arrives one frame before the
+        // batch that creates the element. The first prune with the element
+        // missing keeps the offset, and the second one drops it.
+        defer(703, point(px(0.0), px(-90.0)));
+        prune(&tree_with(&[]));
+        assert_eq!(
+            DEFERRED.with(|cell| cell.borrow().get(&703).map(|deferred| deferred.to)),
+            Some(point(px(0.0), px(-90.0)))
+        );
+        prune(&tree_with(&[]));
+        assert_eq!(take_deferred(703), None);
+    }
+
+    #[test]
+    fn the_prune_keeps_the_offset_of_a_present_element() {
+        defer(704, point(px(0.0), px(-90.0)));
+        prune(&tree_with(&[704]));
+        prune(&tree_with(&[704]));
+        assert_eq!(take_deferred(704), Some(point(px(0.0), px(-90.0))));
     }
 }

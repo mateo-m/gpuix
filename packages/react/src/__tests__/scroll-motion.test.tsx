@@ -456,3 +456,73 @@ describeNative("scroll-initial-target", () => {
     root.unmount()
   })
 })
+
+describeNative("scroll restore", () => {
+  let root: TestRoot
+  beforeEach(() => {
+    root = createTestRoot()
+    root.renderer.clockPause()
+  })
+  afterEach(() => {
+    root.unmount()
+  })
+
+  it("a scrollTo from the mount effect applies on the first frame", () => {
+    // A mount effect runs in the commit that creates the element, so the
+    // call comes before the element ever painted. The offset must stick,
+    // and the first painted frame must show it.
+    function Restored() {
+      const box = React.useRef<{ id: number } | null>(null)
+      React.useLayoutEffect(() => {
+        root.renderer.scrollTo(box.current!.id, 0, -150, "instant")
+      }, [])
+      return (
+        <div ref={box} testId="box" style={{ width: 200, height: 200, overflowY: "auto" }}>
+          {plain(6).map((_, i) => (
+            <div key={i} testId={`row-${i}`} style={{ width: 200, height: 100, flexShrink: 0 }} />
+          ))}
+        </div>
+      )
+    }
+    root.render(<Restored />)
+    const box = root.renderer.findByTestId("box")!
+    expect(root.renderer.getScrollOffset(box.id)![1]).toBe(-150)
+    // The first painted frame already has the offset.
+    expect(root.renderer.getElementBounds(root.renderer.findByTestId("row-0")!.id)![1]).toBe(-150)
+  })
+
+  it("an app saves and restores the offset across a remount", () => {
+    // The pattern of the demo navigation: the cleanup saves the offset
+    // when a screen unmounts, and the mount effect sets it back when the
+    // user goes back, the way iOS keeps the scroll position of a screen.
+    const offsets = new Map<string, [number, number]>()
+    function Screen({ id }: { id: string }) {
+      const box = React.useRef<{ id: number } | null>(null)
+      React.useLayoutEffect(() => {
+        const el = box.current!
+        const saved = offsets.get(id)
+        if (saved) root.renderer.scrollTo(el.id, saved[0], saved[1], "instant")
+        return () => {
+          const offset = root.renderer.getScrollOffset(el.id)
+          if (offset) offsets.set(id, [offset[0]!, offset[1]!])
+        }
+      }, [])
+      return (
+        <div ref={box} testId={`screen-${id}`} style={{ width: 200, height: 200, overflowY: "auto" }}>
+          {plain(6).map((_, i) => (
+            <div key={i} style={{ width: 200, height: 100, flexShrink: 0 }} />
+          ))}
+        </div>
+      )
+    }
+    root.render(<Screen key="a" id="a" />)
+    const first = root.renderer.findByTestId("screen-a")!
+    root.renderer.scrollTo(first.id, 0, -150, "instant")
+
+    root.render(<Screen key="b" id="b" />)
+    root.render(<Screen key="a" id="a" />)
+    const again = root.renderer.findByTestId("screen-a")!
+    expect(again.id).not.toBe(first.id)
+    expect(root.renderer.getScrollOffset(again.id)![1]).toBe(-150)
+  })
+})

@@ -541,7 +541,16 @@ pub(crate) fn build_div(
             let handle = ctx
                 .scroll_handles
                 .entry(element.id)
-                .or_insert_with(gpui::ScrollHandle::new)
+                .or_insert_with(|| {
+                    let handle = gpui::ScrollHandle::new();
+                    // A `scrollTo` can come before the first frame of the
+                    // element, from an effect in the commit that mounts it.
+                    // The new handle starts at that offset, not at zero.
+                    if let Some(to) = super::scroll_motion::take_deferred(element.id) {
+                        handle.set_offset(to);
+                    }
+                    handle
+                })
                 .clone();
             el = el.track_scroll(&handle);
 
@@ -642,14 +651,16 @@ pub(crate) fn build_div(
                 }
             }
         } else {
-            // Element is no longer scrollable — remove stale handle.
+            // The element is no longer scrollable. Remove the stale handle.
             ctx.scroll_handles.remove(&element.id);
             ctx.scrollbars.remove(&element.id);
+            super::scroll_motion::drop_deferred(element.id);
         }
     } else {
-        // No style at all — remove stale handle if it existed.
+        // No style at all. Remove the stale handle if it existed.
         ctx.scroll_handles.remove(&element.id);
         ctx.scrollbars.remove(&element.id);
+        super::scroll_motion::drop_deferred(element.id);
     }
 
     // If a FocusHandle was pre-created for this element (by sync_focus_handles),
