@@ -19,6 +19,7 @@ import { Motion } from "./motion-panel.js"
 import { Navigation } from "./navigation.js"
 import { frameOverlay, Perf } from "./perf.js"
 import { Scrollbars } from "./scrollbars.js"
+import { Selectors } from "./selectors.js"
 import { Variables } from "./variables.js"
 
 /// The palette every panel reads. Exported so a test can mount one panel
@@ -77,6 +78,7 @@ const SECTIONS = [
   { id: "variables", title: "Variables", render: () => <Variables /> },
   { id: "inheritance", title: "Inheritance", render: () => <Inheritance /> },
   { id: "classes", title: "className", render: () => <ClassNames /> },
+  { id: "selectors", title: "Selectors", render: () => <Selectors /> },
   { id: "motion", title: "Motion", render: () => <Motion /> },
   { id: "scrollbars", title: "Scrollbars", render: () => <Scrollbars /> },
   { id: "navigation", title: "Navigation", render: () => <Navigation /> },
