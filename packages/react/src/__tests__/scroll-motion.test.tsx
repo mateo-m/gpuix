@@ -301,6 +301,43 @@ describeNative("scroll snap", () => {
     settle()
     expect(offsetY(id)).toBe(-200)
   })
+
+  it("a fling stops at an always area it passes", () => {
+    const rows = plain(10).map((_, i) => ({
+      scrollSnapAlign: "start",
+      scrollSnapStop: i === 1 ? "always" : undefined,
+    }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    // The lift at -40 predicts a landing near -540, past row 1 at -100.
+    // The always area stops the glide there.
+    fling(id, 4, -10)
+    glide()
+    expect(offsetY(id)).toBe(-100)
+  })
+
+  it("an always area the drag passed cannot pull the fling back", () => {
+    const rows = plain(10).map((_, i) => ({
+      scrollSnapAlign: "start",
+      scrollSnapStop: i === 1 ? "always" : undefined,
+    }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    // The drag takes the box to -150, past the always row at -100. The
+    // fling from the lift passes only positions below -150, so the row
+    // the fingers already passed must not pull the box back up.
+    fling(id, 5, -30)
+    glide()
+    // The 650px glide takes 49 fling frames, more than one `glide`.
+    root.renderer.clockFastForward(300)
+    root.renderer.flush()
+    root.renderer.flush()
+    expect(offsetY(id)).toBe(-800)
+  })
 })
 
 describeNative("the container option of scrollIntoView", () => {

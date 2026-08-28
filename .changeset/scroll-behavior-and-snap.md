@@ -84,3 +84,9 @@ The box never snaps while the fingers stay on the pad, however long
 they rest. The web snaps at the end of the gesture, not during it. The
 lift after a rest has zero velocity, so the box then snaps to the
 nearest position.
+
+The `scroll-snap-stop: always` scan for a fling starts at the offset of
+the lift, not at the offset where the fingers went down. An `always`
+area the drag already passed pulled the box backward at the lift, and
+the consumed momentum stream then held it there. Blink measures the
+fling from its start point, and now GPUIX does too.
