@@ -17,6 +17,7 @@ import { Inheritance } from "./inheritance.js"
 import { Lengths } from "./lengths.js"
 import { Motion } from "./motion-panel.js"
 import { frameOverlay, Perf } from "./perf.js"
+import { Selectors } from "./selectors.js"
 import { Variables } from "./variables.js"
 
 /// The palette every panel reads. Exported so a test can mount one panel
@@ -75,6 +76,7 @@ const SECTIONS = [
   { id: "variables", title: "Variables", render: () => <Variables /> },
   { id: "inheritance", title: "Inheritance", render: () => <Inheritance /> },
   { id: "classes", title: "className", render: () => <ClassNames /> },
+  { id: "selectors", title: "Selectors", render: () => <Selectors /> },
   { id: "motion", title: "Motion", render: () => <Motion /> },
 ] as const
 
