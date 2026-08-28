@@ -2122,12 +2122,13 @@ describeNative("motion", () => {
         />
       </div>
     )
-    // The stripe contrast at a row tells the blur width at that row. A
-    // mask of one half must read as half the radius, so the contrast
-    // must fall in step with the mask across the whole strip. A mapping
-    // that spends the low mask range on blurs too small to see leaves
-    // the rows near the clear end at full contrast, and the fall then
-    // bunches near the black end.
+    // The stripe contrast at a row tells the blur width at that row.
+    // Each pixel must get a Gaussian blur whose sigma is the mask value
+    // there times the full sigma, as the variable blur filter of iOS
+    // does. For these stripes that Gaussian leaves a known contrast:
+    // 255 times (4 / pi) times exp(-2 pi^2 sigma^2 / period^2). The
+    // bounds below bracket that curve. A mapping that mixes a few fixed
+    // blur levels sits far above the curve in the middle of the ramp.
     const contrast = (y: number) => {
       let total = 0
       for (const k of [2, 3, 4]) {
@@ -2140,15 +2141,16 @@ describeNative("motion", () => {
     // Below the strip the stripes stay sharp.
     expect(contrast(200)).toBeGreaterThan(240)
     // Near the black end the blur is close to the full radius.
-    expect(contrast(10)).toBeLessThan(60)
-    // At three quarters of the mask the blur is already strong.
-    expect(contrast(42)).toBeGreaterThan(60)
-    expect(contrast(42)).toBeLessThan(135)
-    // At half the mask the fall is well under way.
-    expect(contrast(84)).toBeLessThan(205)
-    // At three eighths of the mask the blur still shows.
-    expect(contrast(105)).toBeGreaterThan(180)
-    expect(contrast(105)).toBeLessThan(235)
+    expect(contrast(10)).toBeLessThan(30)
+    // At three quarters of the mask the true Gaussian reads near 20.
+    expect(contrast(42)).toBeGreaterThan(8)
+    expect(contrast(42)).toBeLessThan(60)
+    // At half the mask it reads near 95.
+    expect(contrast(84)).toBeGreaterThan(60)
+    expect(contrast(84)).toBeLessThan(150)
+    // At three eighths of the mask it reads near 160.
+    expect(contrast(105)).toBeGreaterThan(120)
+    expect(contrast(105)).toBeLessThan(195)
     // The contrast falls with the mask, with no flat span and no jump.
     const rows = [10, 42, 84, 126, 160]
     for (let i = 1; i < rows.length; i++) {
