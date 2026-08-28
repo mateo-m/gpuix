@@ -210,6 +210,16 @@ export declare class TestGpuixRenderer {
    */
   flush(): void
   /**
+   * Dispatch a scroll wheel event and report whether the dispatch left
+   * the window asking for a paint. The live window only paints when
+   * something asks, so a lift that asks for no paint freezes the snap
+   * glide, which moves one step per painted frame. The harness cannot
+   * catch that through `simulateScrollWheel`: it parks the executor,
+   * which paints on demand and clears the mark. This method reads the
+   * mark right after the dispatch, before any paint.
+   */
+  simulateScrollWheelProbe(x: number, y: number, deltaX: number, deltaY: number, modifiers?: string | undefined | null, phase?: string | undefined | null): boolean
+  /**
    * Simulate a click at the given window coordinates.
    * Dispatches MouseDown + MouseUp through GPUI's input pipeline,
    * which triggers the same event handlers as production.

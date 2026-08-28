@@ -318,6 +318,42 @@ describeNative("scroll snap", () => {
     expect(offsetY(id)).toBe(-100)
   })
 
+  it("the lift asks the window for the paint that starts the glide", () => {
+    const rows = plain(6).map(() => ({ scrollSnapAlign: "start" }))
+    root.render(
+      <Box style={{ scrollSnapType: "y mandatory", scrollbarWidth: "none" }} rows={rows} />
+    )
+    const id = boxId()
+    const [x, y] = root.renderer.getElementBounds(id)!
+    const at = { x: x + 100, y: y + 100 }
+    root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, 0, undefined, "started")
+    for (let i = 0; i < 4; i++) {
+      root.renderer.clockFastForward(8)
+      root.renderer.nativeSimulateScrollWheel(at.x, at.y, 0, -40, undefined, "moved")
+    }
+    // A flush paints and clears the redraw mark, so the probes below
+    // read only what their own dispatch asked for.
+    root.renderer.flush()
+    root.renderer.clockFastForward(8)
+    // The glide moves one step per painted frame, and the live window
+    // only paints when something asks. The lift must ask: with no mark
+    // here, the glide sat inert and the fling stopped dead.
+    expect(
+      root.renderer.nativeSimulateScrollWheelProbe(at.x, at.y, 0, 0, undefined, "ended")
+    ).toBe(true)
+    // The consumed momentum events schedule no paint by themselves, so
+    // each one must also ask, in case a paint cancelled the glide and
+    // the chain of requested frames ended.
+    root.renderer.flush()
+    root.renderer.clockFastForward(16)
+    expect(
+      root.renderer.nativeSimulateScrollWheelProbe(at.x, at.y, 0, -30, undefined, "moved")
+    ).toBe(true)
+    // The glide still lands: the probe dispatches real events.
+    glide()
+    expect(offsetY(id)).toBe(-400)
+  })
+
   it("an always area the drag passed cannot pull the fling back", () => {
     const rows = plain(10).map((_, i) => ({
       scrollSnapAlign: "start",
