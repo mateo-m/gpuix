@@ -96,6 +96,10 @@ function NavRow({ label, detail, onClick }: {
 /// the scrim takes the colour of the panel, the surface the rows scroll
 /// on. The title and the back button sit on top, and each carries its own
 /// view transition name.
+///
+/// The bar blocks clicks, as the iOS bar does: a row scrolled under it is
+/// not clickable. The layers are absolute, so the engine blocks by
+/// default, and the wheel still passes to the list beneath.
 function Header({ screen, onBack }: {
   screen: "root" | "general"
   onBack: () => void
@@ -117,7 +121,6 @@ function Header({ screen, onBack }: {
           // the hold halve the sigma at even distances.
           maskImage:
             "linear-gradient(to bottom, black 40%, rgba(0,0,0,0.5) 55%, rgba(0,0,0,0.25) 68%, rgba(0,0,0,0.125) 79%, rgba(0,0,0,0.06) 89%, transparent)",
-          pointerEvents: "none",
         }}
       />
       <div
@@ -129,7 +132,6 @@ function Header({ screen, onBack }: {
           height: HEADER_HEIGHT,
           backgroundImage:
             "linear-gradient(to bottom, color-mix(in srgb, var(--color-panel) 72%, transparent), ease-in-out, transparent)",
-          pointerEvents: "none",
         }}
       />
       <div
@@ -141,7 +143,6 @@ function Header({ screen, onBack }: {
           right: 0,
           height: HEADER_HEIGHT,
           justifyContent: "center",
-          pointerEvents: "none",
         }}
       >
         <div key={screen} testId={`nav-title-${screen}`} style={{ viewTransitionName: "nav-title" }}>
