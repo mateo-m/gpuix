@@ -440,7 +440,12 @@ export const hostConfig = {
     // hidden. A hover style that sets `visibility` would otherwise paint an
     // element React asked to hide.
     const container = containerFor(instance)
-    const { hover: _hover, active: _active, ...base } = computeStyle(instance.props, container)
+    const {
+      hover: _hover,
+      active: _active,
+      selectors: _selectors,
+      ...base
+    } = computeStyle(instance.props, container)
     container.renderer.setStyle(instance.id, { ...base, visibility: "hidden" })
   },
 

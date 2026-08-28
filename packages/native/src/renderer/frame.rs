@@ -57,12 +57,24 @@ pub(super) struct BuildCtx<'a> {
     /// and a deferred draw from inside the copy's isolated layout would read
     /// its layout ids against the window's tree and panic.
     pub frozen: bool,
+    /// Rules the parent puts on its direct children, `& > *` and
+    /// `& > :not(:last-child)`. They reach one depth only, so every element
+    /// swaps in its own set, possibly empty, before it builds its children.
+    /// The `bool` is the except-last flag.
+    pub direct_rules: Vec<(bool, std::sync::Arc<gpui::StyleRefinement>)>,
+    /// Rules for a whole subtree, `& *`. Pushed going down, cut back on
+    /// return, so an element sees the rules of every ancestor above it.
+    pub descendant_rules: Vec<std::sync::Arc<gpui::StyleRefinement>>,
 }
 
 // ── Element builders ─────────────────────────────────────────────────
 
 pub(super) fn build_element(
     id: u64,
+    // The child index and the child count under the parent, for the index
+    // states. `None` at the root and under a virtual list, whose rows build
+    // outside this walk.
+    position: Option<(usize, usize)>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -177,6 +189,7 @@ pub(super) fn build_element(
                 style,
                 resolved.clone(),
                 motion.as_ref(),
+                position,
                 ctx,
                 window,
                 cx,
@@ -189,6 +202,7 @@ pub(super) fn build_element(
                 style,
                 resolved.clone(),
                 motion.as_ref(),
+                position,
                 ctx,
                 window,
                 cx,
@@ -213,13 +227,24 @@ pub(super) fn build_element(
                 declared
             });
             let style = animated.as_ref().or(style);
-            let custom_children: Vec<gpui::AnyElement> = element
+            // A custom element renders its own box, so a parent's direct
+            // child rules stop here, and its children start a new depth.
+            let saved_direct = std::mem::take(&mut ctx.direct_rules);
+            let present: Vec<u64> = element
                 .children
                 .iter()
                 .copied()
                 .filter(|child_id| ctx.tree.elements.contains_key(child_id))
-                .map(|child_id| build_element(child_id, ctx, window, cx))
                 .collect();
+            let count = present.len();
+            let custom_children: Vec<gpui::AnyElement> = present
+                .into_iter()
+                .enumerate()
+                .map(|(index, child_id)| {
+                    build_element(child_id, Some((index, count)), ctx, window, cx)
+                })
+                .collect();
+            ctx.direct_rules = saved_direct;
             let cascade = ctx.cascade.clone();
             let render_ctx = CustomRenderContext {
                 id,
@@ -433,6 +458,7 @@ pub(crate) fn build_div(
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
     motion: Option<&crate::motion::MotionFrame>,
+    position: Option<(usize, usize)>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -442,11 +468,13 @@ pub(crate) fn build_div(
     let element_id_str = format!("__gpuix_{}", element.id);
     let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
 
-    if let Some(resolved) = resolved {
+    el = apply_child_rules(el, position, ctx);
+
+    if let Some(resolved) = resolved.as_ref() {
         el = crate::style::resolve::apply_resolved(el, &resolved.base);
 
-        // State pseudo-classes. GPUI evaluates these itself, so none of them
-        // waits for React. Each takes a closure that receives a
+        // State pseudo-classes. GPUI evaluates hover and active itself, so
+        // neither waits for React. Each takes a closure that receives a
         // StyleRefinement and returns it, and the closure has to be 'static,
         // so each one holds a clone of the shared resolved style.
         //
@@ -458,6 +486,20 @@ pub(crate) fn build_div(
         // whole refinement per state to read a one-byte tag.
         let states: Vec<State> = resolved.states.iter().map(|(state, _)| *state).collect();
         for state in states {
+            // An index state is a fact of the child position, decided here
+            // rather than through a GPUI variant. Without a position (the
+            // root, a virtual list row) there is nothing to decide against,
+            // so it does not apply.
+            if state.is_index() {
+                let holds =
+                    position.is_some_and(|(index, count)| state.holds_at(index, count));
+                if holds {
+                    if let Some(declared) = resolved.state(state) {
+                        el = crate::style::resolve::apply_resolved(el, declared);
+                    }
+                }
+                continue;
+            }
             let held = resolved.clone();
             let apply = move |refinement: gpui::StyleRefinement| match held.state(state) {
                 Some(declared) => crate::style::resolve::apply_resolved(refinement, declared),
@@ -466,6 +508,7 @@ pub(crate) fn build_div(
             el = match state {
                 State::Hover => el.hover(apply),
                 State::Active => el.active(apply),
+                State::First | State::Last | State::Odd | State::Even | State::Only => el,
             };
         }
     }
@@ -902,16 +945,26 @@ pub(crate) fn build_div(
         el = el.child(text_content(element, content, ctx));
     }
 
-    // Children
-    let child_ids: Vec<u64> = element.children.clone();
-    for child_id in child_ids {
-        let child = build_element(child_id, ctx, window, cx);
+    // Children. The parent's direct child rules reach this depth only, so
+    // the element swaps in its own set here, and its subtree rules join the
+    // descendant stack until the loop returns.
+    let (saved_direct, pushed) = push_child_rules(resolved.as_deref(), ctx);
+    let child_ids: Vec<u64> = element
+        .children
+        .iter()
+        .copied()
+        .filter(|child_id| ctx.tree.elements.contains_key(child_id))
+        .collect();
+    let count = child_ids.len();
+    for (index, child_id) in child_ids.into_iter().enumerate() {
+        let child = build_element(child_id, Some((index, count)), ctx, window, cx);
         el = if overflow_x_only {
             el.child(gpui::div().flex_none().child(child))
         } else {
             el.child(child)
         };
     }
+    pop_child_rules(saved_direct, pushed, ctx);
 
     // Last, so they paint over the content and take the mouse first.
     if let Some(markers) = markers {
@@ -933,6 +986,68 @@ fn add_pixels(length: Option<gpui::DefiniteLength>, extra: gpui::Pixels) -> gpui
         }
         _ => extra.into(),
     }
+}
+
+/// Merge the rules ancestors put on this element, under its own declarations.
+///
+/// `:where()` has specificity zero, so these run before the element's own
+/// refinement, and the element's own set fields win. Descendant rules come
+/// first, then the parent's direct rules, so the nearer declaration wins a
+/// conflict between the two.
+fn apply_child_rules<E: gpui::Styled>(
+    mut el: E,
+    position: Option<(usize, usize)>,
+    ctx: &BuildCtx,
+) -> E {
+    for refinement in &ctx.descendant_rules {
+        el = crate::style::resolve::apply_resolved(el, refinement);
+    }
+    let Some((index, count)) = position else {
+        return el;
+    };
+    let last = index + 1 == count;
+    for (except_last, refinement) in &ctx.direct_rules {
+        if *except_last && last {
+            continue;
+        }
+        el = crate::style::resolve::apply_resolved(el, refinement);
+    }
+    el
+}
+
+/// Install this element's child rules for the walk below it.
+///
+/// Returns the parent's direct rules to restore, and how many descendant
+/// rules to cut back, both through `pop_child_rules`.
+fn push_child_rules(
+    resolved: Option<&crate::style::resolve::Resolved>,
+    ctx: &mut BuildCtx,
+) -> (Vec<(bool, std::sync::Arc<gpui::StyleRefinement>)>, usize) {
+    use crate::style::resolve::ChildScope;
+    let mut direct = Vec::new();
+    let mut pushed = 0;
+    let rules = resolved.map(|resolved| resolved.children.as_slice()).unwrap_or(&[]);
+    for (which, refinement) in rules {
+        match which {
+            ChildScope::All => direct.push((false, refinement.clone())),
+            ChildScope::ExceptLast => direct.push((true, refinement.clone())),
+            ChildScope::Descendants => {
+                ctx.descendant_rules.push(refinement.clone());
+                pushed += 1;
+            }
+        }
+    }
+    (std::mem::replace(&mut ctx.direct_rules, direct), pushed)
+}
+
+fn pop_child_rules(
+    saved_direct: Vec<(bool, std::sync::Arc<gpui::StyleRefinement>)>,
+    pushed: usize,
+    ctx: &mut BuildCtx,
+) {
+    ctx.direct_rules = saved_direct;
+    let keep = ctx.descendant_rules.len() - pushed;
+    ctx.descendant_rules.truncate(keep);
 }
 
 /// A selectable text run owned by `element`. Runs are left to gpui so the
@@ -974,6 +1089,7 @@ pub(crate) fn build_text(
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
     motion: Option<&crate::motion::MotionFrame>,
+    position: Option<(usize, usize)>,
     ctx: &mut BuildCtx,
     window: &mut gpui::Window,
     cx: &mut gpui::Context<GpuixView>,
@@ -983,7 +1099,12 @@ pub(crate) fn build_text(
     // Fast path: plain text leaf without style. It still goes through
     // `text_content` so the glyphs land in the selection registry — the old
     // raw-string return was the reason text was not selectable.
-    if style.is_none() && motion.is_none() && element.children.is_empty() {
+    if style.is_none()
+        && motion.is_none()
+        && element.children.is_empty()
+        && ctx.direct_rules.is_empty()
+        && ctx.descendant_rules.is_empty()
+    {
         let content = element.content.clone().unwrap_or_default();
         return gpui::div()
             .relative()
@@ -996,8 +1117,16 @@ pub(crate) fn build_text(
     // text-only subset, so `padding`, `width` and every layout prop on a text
     // node were silently dropped — a hole with no error and no warning.
     let mut el = gpui::div();
+    el = apply_child_rules(el, position, ctx);
     if let Some(resolved) = resolved.as_ref() {
         el = crate::style::resolve::apply_resolved(el, &resolved.base);
+        for (state, declared) in &resolved.states {
+            if state.is_index()
+                && position.is_some_and(|(index, count)| state.holds_at(index, count))
+            {
+                el = crate::style::resolve::apply_resolved(el, declared);
+            }
+        }
     }
     if let Some(motion) = motion {
         el = crate::style::resolve::apply_motion(el, motion, style);
@@ -1015,10 +1144,18 @@ pub(crate) fn build_text(
         el = el.child(text_content(element, content, ctx));
     }
 
-    let child_ids: Vec<u64> = element.children.clone();
-    for child_id in child_ids {
-        el = el.child(build_element(child_id, ctx, window, cx));
+    let (saved_direct, pushed) = push_child_rules(resolved.as_deref(), ctx);
+    let child_ids: Vec<u64> = element
+        .children
+        .iter()
+        .copied()
+        .filter(|child_id| ctx.tree.elements.contains_key(child_id))
+        .collect();
+    let count = child_ids.len();
+    for (index, child_id) in child_ids.into_iter().enumerate() {
+        el = el.child(build_element(child_id, Some((index, count)), ctx, window, cx));
     }
+    pop_child_rules(saved_direct, pushed, ctx);
 
     el.into_any_element()
 }

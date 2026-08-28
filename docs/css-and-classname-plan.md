@@ -84,6 +84,12 @@ before you design against them.
 | 7 | The steady-state gate asserts a counter, not a duration. | A 2% wall-clock band on a CI runner is noise. It would be muted, and a muted gate reads as coverage. |
 | 8 | The cascade lives in `packages/native/src/cascade.rs`. | `renderer.rs` is already 3,683 lines. |
 
+Revision 4 widens layer 4. The goal is Tailwind in its entirety. `first:`, `last:`, `odd:`,
+`even:` and `only:` become index conditions, and the walk evaluates them from the child index.
+`space-x-*`, `divide-*`, `*:` and `**:` become child conditions, and they flow down with
+`Inherited`. Every variant that still drops now names its prerequisite. See "What still
+drops, and why".
+
 ## Layer 0: the `gpuix-css` crate
 
 New crate at `packages/native/css`, named `gpuix-css`. It depends on `lightningcss` with
@@ -240,6 +246,9 @@ for (condition, refinement) in &cached.variants {
         Condition::Group { name, state: GroupState::Active } => el.group_active(name, |_| refinement.clone()),
         // A media condition is not a GPUI variant. It is evaluated during the walk.
         Condition::Media { .. } => el.style().refine(refinement),
+        // An index condition is not one either. The walk knows the child index
+        // and the child count, and merges when the test holds.
+        Condition::Index { .. } => el.style().refine(refinement),
     };
 }
 ```
@@ -249,6 +258,12 @@ unqualified one.
 
 A media condition is not a GPUI variant. Evaluate it against the window size during the walk
 and merge the refinement when it matches.
+
+An index condition works the same way. The retained tree stores children in order, and the
+walk visits each child with its index and the child count. `first`, `last`, `odd`, `even` and
+`only` are tests on those two numbers, so they need no selector engine. A list mutation
+changes the numbers, and the next frame re-evaluates them, the same way a resize re-evaluates
+a media condition.
 
 ### Delete `apply_styles`
 
@@ -739,18 +754,52 @@ Every variant becomes a `Condition`:
 | `group-active/name:` | `{ kind: "group", name, state: "active" }`         |
 | `sm: md: lg:`        | `{ kind: "media", query }`                         |
 | `max-lg: min-lg:`    | `{ kind: "media", query }`                         |
+| `first:` `last:` `only:` | `{ kind: "index", test }`                      |
+| `odd:` `even:`       | `{ kind: "index", test }`                          |
 
 An unnamed group uses `""`.
 
 Flatten `dark:` at resolve time from an `appearance: "dark" | "light"` option. Key the cache by
 appearance and clear it when the value flips.
 
-Warn once and drop: `group-focus:`, `first:`, `last:`, `odd:`, `even:`, `has-`, `peer-*`,
-`*`, `**`, `motion-safe:`, `print:`.
+### Child conditions
 
-`group-focus:` is dropped for a concrete reason. GPUI has `group_hover` (`div.rs:816`) and
-`group_active` (`div.rs:1509`) but no `group_focus`. Supporting it means either tracking focus
-state per group in GPUIX, or adding the method upstream. Both are follow-ups.
+`space-x-*`, `divide-*` and the `*:` variant compile to a selector on the children.
+`space-x-*` and `divide-*` produce `:where(& > :not(:last-child))`, and `*:` produces
+`& > *`. The class sits on the parent, and the declarations apply to the children.
+
+The rules cross the FFI in one wire field. `StyleDesc` gains `selectors`, a list of
+`{ on, style }` pairs, and the resolver is its only writer. The `style` prop type excludes
+it. The spellings form a closed set: `:first-child`, `:last-child`, `:nth-child(odd)`,
+`:nth-child(even)`, `:only-child`, `& > *`, `& > :not(:last-child)` and `& *`. An unknown
+spelling warns once and drops.
+
+The rules for the children ride in the walk context (`BuildCtx`), not in `Inherited`.
+`Inherited` keys the resolution cache by pointer, so a refinement that changes per parent
+would clear the cache of every child on every frame. The walk context costs nothing there,
+because the rules apply at paint and never touch a cached resolution. Direct rules reach
+one level and swap out at each depth. Descendant rules stack for the whole subtree. A rule
+applies before the child's own declarations. `:where()` has specificity zero, so the
+child's own declarations must win, and this order gives exactly that.
+
+Two places sit outside the walk. A virtual-list row builds on its own, so it has no child
+position and the index conditions do not apply to it. A custom element resolves its own
+`StyleDesc`, so the rules of a parent stop at its border.
+
+### What still drops, and why
+
+The target is the whole of Tailwind, because the goal of this plan is CSS, and Tailwind emits
+CSS. A variant the plan cannot build yet gets a named follow-up with its prerequisite, never a
+permanent drop. Until its follow-up ships, the resolver warns once and drops: `group-focus:`,
+`peer-*`, `has-*`, `motion-safe:`, `print:`.
+
+| Variant | Prerequisite |
+| --- | --- |
+| `group-focus:` | GPUI has `group_hover` (`div.rs:816`) and `group_active` (`div.rs:1509`) but no `group_focus`. Track focus per group in GPUIX, or add the method upstream. |
+| `peer-*` | The hover or focus state of an earlier sibling. The walk visits siblings in order, so it can carry the state of the peers it already passed. It needs the same state store as `group-focus:`. |
+| `has-*` | The state of a descendant, which the walk has not reached yet. Read the state of the last frame, one frame late. A browser pays a comparable invalidation pass. |
+| `motion-safe:` | The OS reduce-motion setting. GPUIX does not read it today. |
+| `print:` | A print target. GPUIX does not print. |
 
 `group-hover` is Tailwind's spelling, but the meaning is plain CSS: an ancestor in `:hover` plus
 a descendant combinator. GPUI has `group(name)` and `group_hover(name, f)` natively. The
@@ -767,7 +816,8 @@ unknown classes and declarations that no GPUI style can hold, so a test asserts 
 
 List these in the package README as well.
 
-- No specificity and no selector engine. Precedence is flat and last write wins.
+- No specificity and no selector engine. Precedence is flat and last write wins. The
+  structural pseudo-classes do not need one. The walk reads the child index.
 - `calc()` cannot mix a percentage with a length.
 - A gradient has at most two colour stops. No radial or conic gradients.
 - No `radial-gradient()`, `conic-gradient()`, `env()`, `attr()` or `image-set()`.
@@ -776,8 +826,7 @@ List these in the package README as well.
 - No `text-decoration`, no `z-index`.
 - `border` sets `border-width` only. There is no border style beyond a solid fill.
 - Percentage padding, margin and inset work. Percentage border width does not.
-- Utilities that need a child or sibling selector do nothing. `space-x-*` and `divide-*` compile
-  to `:where(.x > :not(:last-child))`, which has no meaning without a selector engine.
+- `peer-*` and `has-*` wait on sibling and descendant state. See "What still drops, and why".
 - Variant nesting is one level deep.
 - `style` keeps `hover` and `active`, which a CSS style attribute cannot express. They predate
   this plan. They gain no siblings, and they are candidates for removal in the release that

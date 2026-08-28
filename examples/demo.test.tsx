@@ -22,6 +22,7 @@ import { motion } from "@gpuix/react"
 import { Motion } from "./demo/motion-panel"
 import { Navigation } from "./demo/navigation"
 import { IntoView, Scrollbars } from "./demo/scrollbars"
+import { Selectors } from "./demo/selectors"
 import { Variables } from "./demo/variables"
 import { resolveClassName } from "./demo/classes"
 
@@ -41,6 +42,7 @@ const PANELS = [
   ["variables", <Variables />],
   ["inheritance", <Inheritance />],
   ["classes", <ClassNames />],
+  ["selectors", <Selectors />],
   ["motion", <Motion />],
   ["scrollbars", <Scrollbars />],
   ["navigation", <Navigation />],
@@ -109,6 +111,77 @@ describeNative("a class and the style it stands for", () => {
     expect(
       fs.readFileSync(shot("inline-wins")).equals(fs.readFileSync(shot("inline-wins-expected")))
     ).toBe(true)
+  })
+})
+
+describeNative("selector classes", () => {
+  const FRAME = {
+    ...BASE,
+    ...PALETTES.midnight,
+    width: "100%",
+    height: "100%",
+    backgroundColor: "var(--color-bg)",
+  } as const
+
+  it("paints divide-y the same as borders written by hand", () => {
+    const viaClass = root()
+    viaClass.render(
+      <div style={FRAME}>
+        <div className="col divide-y">
+          <div className="p-3" />
+          <div className="p-3" />
+          <div className="p-3" />
+        </div>
+      </div>
+    )
+    viaClass.renderer.captureScreenshot(shot("divide"))
+    viaClass.unmount()
+
+    const line = { borderBottomWidth: 1, borderColor: "var(--color-line)" } as const
+    const viaStyle = root()
+    viaStyle.render(
+      <div style={FRAME}>
+        <div className="col">
+          <div className="p-3" style={line} />
+          <div className="p-3" style={line} />
+          <div className="p-3" />
+        </div>
+      </div>
+    )
+    viaStyle.renderer.captureScreenshot(shot("divide-expected"))
+    viaStyle.unmount()
+
+    expect(fs.readFileSync(shot("divide")).equals(fs.readFileSync(shot("divide-expected")))).toBe(
+      true
+    )
+  })
+
+  it("paints last: on the row that is last right now", () => {
+    const viaClass = root()
+    viaClass.render(
+      <div style={FRAME}>
+        <div className="col">
+          <div className="p-3 last:bg-brand" />
+          <div className="p-3 last:bg-brand" />
+        </div>
+      </div>
+    )
+    viaClass.renderer.captureScreenshot(shot("last"))
+    viaClass.unmount()
+
+    const viaStyle = root()
+    viaStyle.render(
+      <div style={FRAME}>
+        <div className="col">
+          <div className="p-3" />
+          <div className="p-3" style={{ backgroundColor: "var(--color-brand)" }} />
+        </div>
+      </div>
+    )
+    viaStyle.renderer.captureScreenshot(shot("last-expected"))
+    viaStyle.unmount()
+
+    expect(fs.readFileSync(shot("last")).equals(fs.readFileSync(shot("last-expected")))).toBe(true)
   })
 })
 
@@ -327,7 +400,7 @@ describeNative("the whole application", () => {
     test.render(<App />)
     expect(test.renderer.getPaintedText()).toContain("GPUIX")
 
-    for (const title of ["Lengths", "Variables", "Inheritance", "className", "Motion", "Scrollbars", "Navigation", "Performance", "Colours"]) {
+    for (const title of ["Lengths", "Variables", "Inheritance", "className", "Selectors", "Motion", "Scrollbars", "Navigation", "Performance", "Colours"]) {
       const item = test.renderer.findByText(title)
       expect(item, `no sidebar item named ${title}`).toBeDefined()
       const bounds = test.renderer.getElementBounds(item!.id)
