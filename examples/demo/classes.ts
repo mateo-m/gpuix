@@ -49,6 +49,8 @@ const EXACT: Record<string, StyleDesc> = {
   relative: { position: "relative" },
   absolute: { position: "absolute" },
   border: { borderWidth: 1, borderColor: "var(--color-line)" },
+  "border-b": { borderBottomWidth: 1, borderColor: "var(--color-line)" },
+  "border-b-0": { borderBottomWidth: 0 },
   rounded: { borderRadius: 8 },
   mono: { fontFamily: "var(--font-mono)" },
   pointer: { cursor: "pointer" },
