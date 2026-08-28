@@ -225,6 +225,53 @@ describeNative("view transitions", () => {
     expect(boundsOf(rowId)![1]).toBeCloseTo(-120, 0)
   })
 
+  it("keeps the scroll offset when the swap hangs detached at start time", () => {
+    // React removes an old subtree in two steps: the commit unlinks it,
+    // and a later batch destroys each element. For a swap nested under a
+    // component, the destroy lands after the start call, so the old ids
+    // still sit in the element map, detached. The remap must not treat
+    // them as live, or the copy takes fresh ids and a fresh scroll
+    // handle at offset zero, and the list flashes back to the top.
+    const rows = (label: string) => {
+      const items = []
+      for (let i = 0; i < 12; i++) {
+        items.push(
+          <div key={i} style={{ width: "100%", height: 50, flexShrink: 0 }}>
+            <text>{`${label} ${i}`}</text>
+          </div>
+        )
+      }
+      return items
+    }
+    const NestedScreen = ({ label }: { label: string }) => (
+      <div
+        key={label}
+        testId={`screen-${label}`}
+        style={{ width: "100%", height: "100%", overflowY: "scroll", viewTransitionName: "screen" }}
+      >
+        {rows(label)}
+      </div>
+    )
+    const Frame = ({ screen }: { screen: string }) => (
+      <div style={{ width: 320, height: 440, overflow: "hidden", position: "relative" }}>
+        <NestedScreen label={screen} />
+      </div>
+    )
+    const { render, renderer } = root
+    renderer.clockPause()
+    render(<Frame screen="A" />)
+    const scrolled = renderer.findByTestId("screen-A")!
+    const rowId = scrolled.children[0]!
+    renderer.scrollTo(scrolled.id, 0, -90, "instant")
+    expect(boundsOf(rowId)![1]).toBeCloseTo(-90, 0)
+
+    startViewTransition(renderer, () => render(<Frame screen="B" />), PUSH)
+    renderer.clockFastForward(16)
+    expect(boundsOf(rowId)![1]).toBeCloseTo(-90, 0)
+    renderer.clockFastForward(134)
+    expect(boundsOf(rowId)![1]).toBeCloseTo(-90, 0)
+  })
+
   it("runs the update alone on a renderer without the native methods", () => {
     let ran = false
     const bare = {} as Parameters<typeof startViewTransition>[0]
