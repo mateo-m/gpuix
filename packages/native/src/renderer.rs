@@ -3246,10 +3246,26 @@ impl gpui::Render for GpuixView {
         let view_transition = self.view_transition.take().and_then(|mut transition| {
             transition.tick(now).then_some(transition)
         });
+        // A frame can build between the capture and the start call, after
+        // the swap already removed the old elements from the tree. The ids
+        // of the pending captures count as kept too, or that frame drops
+        // their scroll handles, and the frozen copy of a scrolled screen
+        // then paints from a fresh handle at offset zero.
+        let pending_ids: std::collections::HashSet<u64> = self
+            .pending_view_transition
+            .as_ref()
+            .map(|captures| {
+                captures
+                    .values()
+                    .flat_map(|capture| capture.tree.elements.keys().copied())
+                    .collect()
+            })
+            .unwrap_or_default();
         let kept_by_transition = |id: &u64| {
-            view_transition
-                .as_ref()
-                .is_some_and(|transition| transition.keeps(*id))
+            pending_ids.contains(id)
+                || view_transition
+                    .as_ref()
+                    .is_some_and(|transition| transition.keeps(*id))
         };
 
         // Ensure custom element instances are destroyed when their IDs disappear.
