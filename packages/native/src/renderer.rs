@@ -2979,8 +2979,12 @@ impl GpuixView {
             highlight_events: &mut highlight_events,
             vt: self.view_transition.as_ref(),
             frozen: false,
+            direct_rules: Vec::new(),
+            descendant_rules: Vec::new(),
         };
-        let child = build_element(expected_child_id, &mut build_ctx, window, cx);
+        // A virtual row builds outside the tree walk, so it has no child
+        // position and the index states do not apply to it.
+        let child = build_element(expected_child_id, None, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
         if motion_active {
             window.request_animation_frame();
@@ -3232,8 +3236,10 @@ impl gpui::Render for GpuixView {
                     highlight_events: &mut highlight_events,
                     vt: view_transition.as_ref(),
                     frozen: false,
+                    direct_rules: Vec::new(),
+                    descendant_rules: Vec::new(),
                 };
-                let root = build_element(root_id, &mut ctx, window, cx);
+                let root = build_element(root_id, None, &mut ctx, window, cx);
                 // Names captured without a successor paint as frozen copies
                 // over the tree. Built after the root, so they paint last.
                 let copies = view_transition::exit_copies(&mut ctx, window, cx);

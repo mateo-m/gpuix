@@ -333,11 +333,20 @@ export interface StyleDesc {
   // Pseudo-selector styles, applied by GPUI natively (no JS round-trip).
   // Nesting is one level deep: hover/active cannot contain hover/active.
   //
-  // These two are the only conditions `style` carries, and they are here for
-  // history. A CSS `style` attribute holds declarations, not selectors. Any
-  // further condition belongs in a class, not here.
+  // These two named fields are here for history. A CSS `style` attribute
+  // holds declarations, not selectors, so the style prop gets no further
+  // condition. A class resolver sends every other condition through
+  // `selectors` below.
   hover?: StyleDeclarations
   active?: StyleDeclarations
+
+  // Conditioned blocks from a class resolver. `on` takes a canonical
+  // selector spelling from the closed set the engine reads:
+  // `:first-child`, `:last-child`, `:nth-child(odd)`, `:nth-child(even)`,
+  // `:only-child` for the element's own position, and `& > *`,
+  // `& > :not(:last-child)`, `& *` for rules on its children. Anything
+  // else warns once in the engine and drops.
+  selectors?: SelectorRule[]
 
   // Custom properties. A declaration here is in scope for `var()` on this
   // element and on everything below it, the same as in CSS.
@@ -349,7 +358,7 @@ export interface StyleDesc {
 }
 
 /**
- * What `hover` and `active` may hold.
+ * What `hover`, `active` and a selector rule may hold.
  *
  * No nesting, and no custom properties. A declaration inside a state has
  * nothing to apply to, because the cascade reads variables from the element
@@ -357,8 +366,14 @@ export interface StyleDesc {
  */
 export type StyleDeclarations = Omit<
   StyleDesc,
-  "hover" | "active" | `--${string}`
+  "hover" | "active" | "selectors" | `--${string}`
 >
+
+/** One conditioned block from a class resolver. */
+export interface SelectorRule {
+  on: string
+  style: StyleDeclarations
+}
 
 // Element types supported by GPUIX
 export type ElementType =
@@ -548,7 +563,9 @@ export interface Props {
   // `DetailedHTMLProps` already carries `key`. Without this field every
   // `<div key={...} />` inside a `.map()` fails to typecheck.
   key?: React.Key | null
-  style?: StyleDesc
+  // A style attribute holds declarations, not selectors, so the prop cannot
+  // carry `selectors`. A class resolver is the only writer of that field.
+  style?: Omit<StyleDesc, "selectors">
   /**
    * Class tokens, separated by spaces, read by the root's resolver.
    *
@@ -636,7 +653,7 @@ export interface TextareaProps extends InputProps {
 type VirtualListShared = {
   // See the note on `Props.key`.
   key?: React.Key | null
-  style?: StyleDesc
+  style?: Omit<StyleDesc, "selectors">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
   alignment?: "top" | "bottom"
