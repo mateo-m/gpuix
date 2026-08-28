@@ -14,8 +14,6 @@ import type { NativeRenderer, ViewTransitionOptions } from "@gpuix/react"
 import { Panel } from "./ui.js"
 
 const HEADER_HEIGHT = 56
-/// How far past the bar the backdrop blur fades out.
-const BLUR_TAIL = 28
 /// A spring without bounce: fast out of the gate, a long soft landing,
 /// and no overshoot, like a critically damped UIKit spring.
 const SPRING: [number, number, number, number] = [0.36, 0.66, 0.04, 1]
@@ -89,9 +87,11 @@ function NavRow({ label, detail, onClick }: {
 /// The header that never unmounts, built as the soft scroll edge effect
 /// of iOS 26. Two layers make the effect. The first is a variable backdrop
 /// blur with a saturation and contrast lift, and the colour matrix rides
-/// the same mask as the blur. The mask holds full width behind the bar and
-/// then falls off on a log scale, so every span of the tail shows the same
-/// visible change. The second is a gradient scrim. iOS reads the scrim
+/// the same mask as the blur. The mask holds full width over the top of
+/// the bar and then falls off on a log scale, to zero at the bottom edge
+/// of the bar, as iOS does. A row at rest below the bar stays sharp, and
+/// blurs only where it passes under. The second is a gradient scrim. iOS
+/// reads the scrim
 /// colour from the content under the bar, which the engine cannot do, so
 /// the scrim takes the colour of the panel, the surface the rows scroll
 /// on. The title and the back button sit on top, and each carries its own
@@ -109,7 +109,7 @@ function Header({ screen, onBack }: {
           top: 0,
           left: 0,
           right: 0,
-          height: HEADER_HEIGHT + BLUR_TAIL,
+          height: HEADER_HEIGHT,
           backdropFilter: "blur(16px) saturate(1.8) contrast(1.05)",
           // The eye reads blur on a log scale. Sigma 4 and sigma 16 both
           // look like mush on small text, so a linear fade of the sigma
@@ -126,7 +126,7 @@ function Header({ screen, onBack }: {
           top: 0,
           left: 0,
           right: 0,
-          height: HEADER_HEIGHT + BLUR_TAIL,
+          height: HEADER_HEIGHT,
           backgroundImage:
             "linear-gradient(to bottom, color-mix(in srgb, var(--color-panel) 72%, transparent), ease-in-out, transparent)",
           pointerEvents: "none",
