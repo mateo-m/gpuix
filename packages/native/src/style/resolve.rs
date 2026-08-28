@@ -41,9 +41,12 @@ pub(crate) fn reset_resolutions() {
 
 /// One state pseudo-class, which is one kind of condition.
 ///
-/// GPUI evaluates these itself at paint, with no re-render and no second
-/// resolve, so a pointer moving over an element costs nothing in this crate.
-/// That is why states live beside the resolved style rather than inside it.
+/// GPUI evaluates `Hover` and `Active` itself at paint, with no re-render and
+/// no second resolve, so a pointer moving over an element costs nothing in
+/// this crate. The index states have no GPUI counterpart. The walk knows the
+/// child index and the child count when it builds an element, so it merges an
+/// index refinement in place, and a list mutation re-evaluates it on the next
+/// frame the way a resize re-evaluates a media condition.
 ///
 /// Conditions are an open set. Adding `:focus` is one variant here and one arm
 /// at the paint site, not a new field on every resolution in the tree.
@@ -51,6 +54,82 @@ pub(crate) fn reset_resolutions() {
 pub(crate) enum State {
     Hover,
     Active,
+    First,
+    Last,
+    Odd,
+    Even,
+    Only,
+}
+
+impl State {
+    /// Whether the child position decides this state.
+    pub(crate) fn is_index(self) -> bool {
+        !matches!(self, State::Hover | State::Active)
+    }
+
+    /// Whether this index state holds at a child position.
+    ///
+    /// `index` is zero based. `:nth-child` counts from one, so the first
+    /// child is odd.
+    pub(crate) fn holds_at(self, index: usize, count: usize) -> bool {
+        match self {
+            State::Hover | State::Active => false,
+            State::First => index == 0,
+            State::Last => index + 1 == count,
+            State::Odd => index % 2 == 0,
+            State::Even => index % 2 == 1,
+            State::Only => count == 1,
+        }
+    }
+}
+
+/// Which children of the declaring element a child rule styles.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum ChildScope {
+    /// `& > *`: every direct child.
+    All,
+    /// `& > :not(:last-child)`: every direct child except the last, the
+    /// selector `space-x-*` and `divide-*` compile to.
+    ExceptLast,
+    /// `& *`: every element below, at any depth.
+    Descendants,
+}
+
+/// What one `selectors` entry means.
+pub(crate) enum Selector {
+    State(State),
+    Children(ChildScope),
+}
+
+impl Selector {
+    /// Read the selector text the class resolver produced.
+    ///
+    /// The set is closed. The resolver writes these canonical spellings, and
+    /// anything else warns once and drops, so a typo never fails silently.
+    pub(crate) fn parse(on: &str) -> Option<Selector> {
+        Some(match on {
+            ":first-child" => Selector::State(State::First),
+            ":last-child" => Selector::State(State::Last),
+            ":nth-child(odd)" => Selector::State(State::Odd),
+            ":nth-child(even)" => Selector::State(State::Even),
+            ":only-child" => Selector::State(State::Only),
+            "& > *" => Selector::Children(ChildScope::All),
+            "& > :not(:last-child)" => Selector::Children(ChildScope::ExceptLast),
+            "& *" => Selector::Children(ChildScope::Descendants),
+            _ => return None,
+        })
+    }
+}
+
+/// Warn about a selector the engine does not know, once per spelling.
+pub(crate) fn warn_unknown_selector(on: &str) {
+    use std::collections::HashSet;
+    use std::sync::Mutex;
+    static WARNED: Mutex<Option<HashSet<String>>> = Mutex::new(None);
+    let mut warned = WARNED.lock().unwrap();
+    if warned.get_or_insert_with(HashSet::new).insert(on.to_owned()) {
+        log::warn!("unknown selector {on:?} in a style, dropped");
+    }
 }
 
 /// A `StyleDesc` with every value turned into a GPUI value.
@@ -68,6 +147,12 @@ pub(crate) struct Resolved {
     /// carried the full size of a refinement each whether or not anything used
     /// them.
     pub states: Vec<(State, StyleRefinement)>,
+    /// Rules this element puts on its children, from selectors such as
+    /// `& > :not(:last-child)`. The refinements sit behind an `Arc` because
+    /// the walk hands them down to every child in the scope, and a child
+    /// applies them under its own declarations, the zero specificity of
+    /// `:where()`.
+    pub children: Vec<(ChildScope, std::sync::Arc<StyleRefinement>)>,
     /// The cascade this resolution read, or `None` when it read nothing
     /// inherited.
     ///
@@ -87,9 +172,21 @@ impl Resolved {
             .states()
             .map(|(state, declared)| (state, resolve(declared, &scope)))
             .collect();
+        let mut children = Vec::new();
+        for rule in style.selectors.iter().flatten() {
+            match Selector::parse(&rule.on) {
+                Some(Selector::Children(which)) => {
+                    children.push((which, std::sync::Arc::new(resolve(&rule.style, &scope))));
+                }
+                // `states()` already read these.
+                Some(Selector::State(_)) => {}
+                None => warn_unknown_selector(&rule.on),
+            }
+        }
         Self {
             base,
             states,
+            children,
             cascade: scope.used_a_variable().then(|| cascade.clone()),
         }
     }
@@ -662,6 +759,86 @@ mod tests {
             resolved.states.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
             vec![State::Hover, State::Active]
         );
+    }
+
+    #[test]
+    fn index_selectors_resolve_as_states() {
+        use crate::style::SelectorRule;
+        let rule = |on: &str, color: &str| SelectorRule {
+            on: on.to_string(),
+            style: styled(color),
+        };
+        let style = StyleDesc {
+            selectors: Some(vec![
+                rule(":first-child", "#ff0000"),
+                rule(":last-child", "#00ff00"),
+                rule(":nth-child(odd)", "#0000ff"),
+                rule(":nth-child(even)", "#ffff00"),
+                rule(":only-child", "#00ffff"),
+            ]),
+            ..Default::default()
+        };
+        let cascade = no_variables();
+        let resolved = Resolved::build(&style, &cascade);
+        assert_eq!(
+            resolved.states.iter().map(|(s, _)| *s).collect::<Vec<_>>(),
+            vec![State::First, State::Last, State::Odd, State::Even, State::Only]
+        );
+        let plain = cascade.scope();
+        assert_eq!(
+            resolved.state(State::First),
+            Some(&resolve(&styled("#ff0000"), &plain))
+        );
+        assert!(resolved.children.is_empty());
+    }
+
+    #[test]
+    fn child_selectors_resolve_as_child_rules_and_unknown_ones_drop() {
+        use crate::style::SelectorRule;
+        let rule = |on: &str, color: &str| SelectorRule {
+            on: on.to_string(),
+            style: styled(color),
+        };
+        let style = StyleDesc {
+            selectors: Some(vec![
+                rule("& > *", "#ff0000"),
+                rule("& > :not(:last-child)", "#00ff00"),
+                rule("& *", "#0000ff"),
+                rule(":focus", "#ffffff"),
+            ]),
+            ..Default::default()
+        };
+        let resolved = Resolved::build(&style, &no_variables());
+        assert_eq!(
+            resolved.children.iter().map(|(scope, _)| *scope).collect::<Vec<_>>(),
+            vec![ChildScope::All, ChildScope::ExceptLast, ChildScope::Descendants]
+        );
+        // `:focus` is not in the closed set yet: it warns once and drops,
+        // and it must not leak into the states either.
+        assert!(resolved.states.is_empty());
+    }
+
+    #[test]
+    fn an_index_state_reads_the_child_position() {
+        let table = [
+            (State::First, 0, 3, true),
+            (State::First, 1, 3, false),
+            (State::Last, 2, 3, true),
+            (State::Last, 1, 3, false),
+            // `:nth-child` counts from one, so the first child is odd.
+            (State::Odd, 0, 3, true),
+            (State::Odd, 1, 3, false),
+            (State::Even, 1, 3, true),
+            (State::Even, 2, 3, false),
+            (State::Only, 0, 1, true),
+            (State::Only, 0, 2, false),
+        ];
+        for (state, index, count, holds) in table {
+            assert_eq!(state.holds_at(index, count), holds, "{state:?} at {index} of {count}");
+            assert!(state.is_index());
+        }
+        assert!(!State::Hover.is_index());
+        assert!(!State::Active.is_index());
     }
 
     #[test]
