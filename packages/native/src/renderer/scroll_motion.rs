@@ -19,6 +19,7 @@
 
 use std::cell::RefCell;
 use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 use std::time::Instant;
 
 use gpui::{point, px, Pixels, Point, ScrollHandle};
@@ -30,6 +31,11 @@ use crate::style::StyleDesc;
 use super::scroll_into_view::{
     axis_delta, scroll_into_view, scroll_margin, scroll_padding, Align, Container,
 };
+
+/// `GPUIX_SNAP_DEBUG=1` logs every wheel phase, each lift with its
+/// predicted landing and sample ages, and each chosen snap target.
+static SNAP_DEBUG: LazyLock<bool> =
+    LazyLock::new(|| std::env::var_os("GPUIX_SNAP_DEBUG").is_some());
 
 /// How long a smooth scroll takes, in seconds.
 const SMOOTH_SECONDS: f64 = 0.3;
@@ -116,8 +122,6 @@ struct Gesture {
     /// The wheel deltas while the fingers are down, with their times.
     /// The lift reads its velocity from the newest of these.
     samples: Vec<(Instant, Point<Pixels>)>,
-    /// The offset when the fingers went down, for `scroll-snap-stop`.
-    from: Point<Pixels>,
     /// The fingers are on the pad.
     down: bool,
     /// The fingers lifted and a snap glide runs. The OS keeps sending
@@ -168,6 +172,15 @@ pub(crate) fn gesture_wheel(
     now: Instant,
 ) -> bool {
     use gpui::TouchPhase;
+    if *SNAP_DEBUG {
+        eprintln!(
+            "[snap] id={} phase={:?} delta=({:.1},{:.1})",
+            id,
+            phase,
+            f32::from(delta.x),
+            f32::from(delta.y),
+        );
+    }
     GESTURES.with(|cell| {
         let mut gestures = cell.borrow_mut();
         match phase {
@@ -180,7 +193,6 @@ pub(crate) fn gesture_wheel(
                     id,
                     Gesture {
                         samples: Vec::new(),
-                        from: handle.offset(),
                         down: true,
                         coasting: false,
                         last_momentum: now,
@@ -229,9 +241,39 @@ pub(crate) fn gesture_wheel(
                     return false;
                 };
                 let landing = predicted_landing(handle, &gesture.samples, now);
+                if *SNAP_DEBUG {
+                    let ages: Vec<u128> = gesture
+                        .samples
+                        .iter()
+                        .map(|(at, _)| (now - *at).as_millis())
+                        .collect();
+                    eprintln!(
+                        "[snap] lift id={} offset=({:.1},{:.1}) landing=({:.1},{:.1}) ages_ms={:?}",
+                        id,
+                        f32::from(handle.offset().x),
+                        f32::from(handle.offset().y),
+                        f32::from(landing.x),
+                        f32::from(landing.y),
+                        ages,
+                    );
+                }
+                // The `scroll-snap-stop: always` scan starts at the offset
+                // of the lift, not at the offset where the fingers went
+                // down. The fling passes only the positions between the
+                // lift and the landing. An `always` area the drag already
+                // passed must not pull the box back, and Blink's fling
+                // strategy also measures from the fling start.
                 if let Some(target) =
-                    snap_target(tree, id, snap, handle, gesture.from, landing, handles)
+                    snap_target(tree, id, snap, handle, handle.offset(), landing, handles)
                 {
+                    if *SNAP_DEBUG {
+                        eprintln!(
+                            "[snap] target id={} to=({:.1},{:.1})",
+                            id,
+                            f32::from(target.x),
+                            f32::from(target.y),
+                        );
+                    }
                     if target != handle.offset() {
                         animate_fling(id, handle, target);
                         gesture.coasting = true;
