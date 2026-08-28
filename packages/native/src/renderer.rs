@@ -2886,8 +2886,12 @@ impl GpuixView {
             highlight,
             highlights: &mut self.highlights,
             highlight_events: &mut highlight_events,
+            direct_rules: Vec::new(),
+            descendant_rules: Vec::new(),
         };
-        let child = build_element(expected_child_id, &mut build_ctx, window, cx);
+        // A virtual row builds outside the tree walk, so it has no child
+        // position and the index states do not apply to it.
+        let child = build_element(expected_child_id, None, &mut build_ctx, window, cx);
         emit_highlight_events(&callback, &highlight_events);
         if motion_active {
             window.request_animation_frame();
@@ -3124,8 +3128,10 @@ impl gpui::Render for GpuixView {
                     highlight: None,
                     highlights: &mut self.highlights,
                     highlight_events: &mut highlight_events,
+                    direct_rules: Vec::new(),
+                    descendant_rules: Vec::new(),
                 };
-                build_element(root_id, &mut ctx, window, cx)
+                build_element(root_id, None, &mut ctx, window, cx)
             }
             None => gpui::Empty.into_any_element(),
         };

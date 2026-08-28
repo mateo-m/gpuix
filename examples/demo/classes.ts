@@ -153,6 +153,30 @@ function base(token: string): StyleDesc | null {
     }
     case "ring":
       return { borderWidth: 1, borderColor: color(value) ?? undefined }
+    case "space": {
+      // `space-y-2` puts a margin on every child except the last one.
+      const at = value.indexOf("-")
+      if (at !== 1) return null
+      const length = step(value.slice(2))
+      if (!length) return null
+      const key = value[0] === "x" ? "marginRight" : value[0] === "y" ? "marginBottom" : null
+      if (!key) return null
+      return { selectors: [{ on: "& > :not(:last-child)", style: { [key]: length } }] }
+    }
+    case "divide": {
+      // `divide-y` puts a line under every child except the last one.
+      const key =
+        value === "x" ? "borderRightWidth" : value === "y" ? "borderBottomWidth" : null
+      if (!key) return null
+      return {
+        selectors: [
+          {
+            on: "& > :not(:last-child)",
+            style: { [key]: 1, borderColor: "var(--color-line)" },
+          },
+        ],
+      }
+    }
     case "opacity": {
       const amount = Number(value)
       return Number.isFinite(amount) ? { opacity: amount / 100 } : null
@@ -164,15 +188,36 @@ function base(token: string): StyleDesc | null {
 
 const STATES = ["hover", "active"] as const
 
+/// The selector each variant prefix stands for, in the canonical spelling
+/// the engine reads.
+const SELECTORS: Record<string, string> = {
+  first: ":first-child",
+  last: ":last-child",
+  odd: ":nth-child(odd)",
+  even: ":nth-child(even)",
+  only: ":only-child",
+  "*": "& > *",
+  "**": "& *",
+}
+
 /// The style one token declares, or `null` for a token this does not know.
 export function resolveClassName(token: string): StyleDesc | null {
   for (const state of STATES) {
     if (!token.startsWith(`${state}:`)) continue
     const inner = base(token.slice(state.length + 1))
-    if (!inner) return null
+    if (!inner || inner.selectors) return null
     // A state holds no nesting and no custom properties, and `base` never
     // returns either, so this reads the same object under the narrower type.
     return state === "hover" ? { hover: inner as State } : { active: inner as State }
+  }
+  const colon = token.indexOf(":")
+  if (colon > 0) {
+    const on = SELECTORS[token.slice(0, colon)]
+    if (!on) return null
+    const inner = base(token.slice(colon + 1))
+    // One level deep, as with the states: a selector cannot hold a selector.
+    if (!inner || inner.selectors) return null
+    return { selectors: [{ on, style: inner as State }] }
   }
   return base(token)
 }

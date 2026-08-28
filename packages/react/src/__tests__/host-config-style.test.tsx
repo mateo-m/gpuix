@@ -19,6 +19,7 @@ import type {
   HostContext,
   NativeRenderer,
   Props,
+  StyleDesc,
 } from "../types/host"
 
 interface StyleCall {
@@ -119,7 +120,7 @@ describe("host config style routing", () => {
 })
 
 /// A resolver over a fixed table, counting what it was asked.
-function tableResolver(table: Record<string, Props["style"]>) {
+function tableResolver(table: Record<string, StyleDesc>) {
   const asked: string[] = []
   const resolve: ClassNameResolver = (token) => {
     asked.push(token)
@@ -227,6 +228,76 @@ describe("className", () => {
     const last = lastStyle(renderer)
     expect(last).toEqual({ padding: 16, backgroundColor: "#ff0000" })
     expect(last?.visibility).toBeUndefined()
+  })
+
+  it("merges two tokens on the same selector into one rule", () => {
+    const { resolve } = tableResolver({
+      "first-pad": { selectors: [{ on: ":first-child", style: { padding: 8 } }] },
+      "first-red": {
+        selectors: [{ on: ":first-child", style: { backgroundColor: "#ff0000" } }],
+      },
+      spaced: {
+        selectors: [{ on: "& > :not(:last-child)", style: { marginBottom: 4 } }],
+      },
+    })
+    const props = { className: "first-pad first-red spaced" }
+    const { renderer, instance } = setup(props, resolve)
+
+    hostConfig.commitUpdate(instance, "div", {}, props, null)
+
+    expect(lastStyle(renderer)).toEqual({
+      selectors: [
+        { on: ":first-child", style: { padding: 8, backgroundColor: "#ff0000" } },
+        { on: "& > :not(:last-child)", style: { marginBottom: 4 } },
+      ],
+    })
+  })
+
+  it("lets the style prop beat an index selector, and leaves child rules alone", () => {
+    // `:first-child` styles this element, so a key the style prop sets goes.
+    // `& > *` styles the children, and the inline style of this element says
+    // nothing about those.
+    const { resolve } = tableResolver({
+      "first-red": {
+        selectors: [
+          { on: ":first-child", style: { backgroundColor: "#ff0000", padding: 8 } },
+        ],
+      },
+      "children-red": {
+        selectors: [{ on: "& > *", style: { backgroundColor: "#ff0000" } }],
+      },
+    })
+    const props = {
+      className: "first-red children-red",
+      style: { backgroundColor: "#0000ff" },
+    }
+    const { renderer, instance } = setup(props, resolve)
+
+    hostConfig.commitUpdate(instance, "div", {}, props, null)
+
+    expect(lastStyle(renderer)).toEqual({
+      backgroundColor: "#0000ff",
+      selectors: [
+        { on: ":first-child", style: { padding: 8 } },
+        { on: "& > *", style: { backgroundColor: "#ff0000" } },
+      ],
+    })
+  })
+
+  it("drops the selector rules while the element is hidden", () => {
+    // An index selector that sets `visibility` would otherwise paint an
+    // element React asked to hide, the same hole `hover` had.
+    const { resolve } = tableResolver({
+      "first-peek": {
+        padding: 16,
+        selectors: [{ on: ":first-child", style: { visibility: "visible" } }],
+      },
+    })
+    const { renderer, instance } = setup({ className: "first-peek" }, resolve)
+
+    hostConfig.hideInstance(instance)
+
+    expect(lastStyle(renderer)).toEqual({ padding: 16, visibility: "hidden" })
   })
 
   it("drops the hover style of a class while the element is hidden", () => {
