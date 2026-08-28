@@ -2089,6 +2089,73 @@ describeNative("motion", () => {
     expect(renderer.pixelAt(150, 150)[0]).toBeGreaterThan(240)
   })
 
+  it("ramps the backdrop blur radius with the mask value", () => {
+    const { render, renderer } = createTestRoot()
+    const cells = []
+    for (let i = 0; i < 16; i++) {
+      cells.push(
+        <div
+          key={i}
+          style={{
+            width: 16,
+            height: "100%",
+            backgroundColor: i % 2 === 0 ? "#000000" : "#ffffff",
+          }}
+        />
+      )
+    }
+    render(
+      <div style={{ position: "relative", width: 256, height: 240 }}>
+        <div style={{ display: "flex", flexDirection: "row", width: 256, height: 240 }}>
+          {cells}
+        </div>
+        <div
+          style={{
+            position: "absolute",
+            left: 0,
+            top: 0,
+            width: 256,
+            height: 168,
+            backdropFilter: "blur(16px)",
+            maskImage: "linear-gradient(to bottom, black, transparent)",
+          }}
+        />
+      </div>
+    )
+    // The stripe contrast at a row tells the blur width at that row. A
+    // mask of one half must read as half the radius, so the contrast
+    // must fall in step with the mask across the whole strip. A mapping
+    // that spends the low mask range on blurs too small to see leaves
+    // the rows near the clear end at full contrast, and the fall then
+    // bunches near the black end.
+    const contrast = (y: number) => {
+      let total = 0
+      for (const k of [2, 3, 4]) {
+        const black = renderer.pixelAt(8 + 32 * k, y)[0]
+        const white = renderer.pixelAt(24 + 32 * k, y)[0]
+        total += white - black
+      }
+      return total / 3
+    }
+    // Below the strip the stripes stay sharp.
+    expect(contrast(200)).toBeGreaterThan(240)
+    // Near the black end the blur is close to the full radius.
+    expect(contrast(10)).toBeLessThan(60)
+    // At three quarters of the mask the blur is already strong.
+    expect(contrast(42)).toBeGreaterThan(60)
+    expect(contrast(42)).toBeLessThan(135)
+    // At half the mask the fall is well under way.
+    expect(contrast(84)).toBeLessThan(205)
+    // At three eighths of the mask the blur still shows.
+    expect(contrast(105)).toBeGreaterThan(180)
+    expect(contrast(105)).toBeLessThan(235)
+    // The contrast falls with the mask, with no flat span and no jump.
+    const rows = [10, 42, 84, 126, 160]
+    for (let i = 1; i < rows.length; i++) {
+      expect(contrast(rows[i])).toBeGreaterThan(contrast(rows[i - 1]))
+    }
+  })
+
   it("cuts corners to the declared shape", () => {
     const { render, renderer } = createTestRoot()
     const box = { width: 100, height: 100, backgroundColor: "#ff0000" }
