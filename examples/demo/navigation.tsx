@@ -69,12 +69,15 @@ function NavRow({ label, detail, onClick }: {
   return (
     <div
       testId={`nav-row-${label}`}
-      className={["row items-center px-4 py-3", onClick ? "pointer hover:bg-raised" : ""].join(" ")}
+      // The border comes from a class, because the style prop beats a class
+      // in every state and `last:` could not take it back.
+      className={[
+        "row items-center px-4 py-3 border-b last:border-b-0",
+        onClick ? "pointer hover:bg-raised" : "",
+      ].join(" ")}
       style={{
         flexShrink: 0,
         justifyContent: "space-between",
-        borderBottomWidth: 1,
-        borderColor: "var(--color-line)",
       }}
       onClick={onClick}
     >
