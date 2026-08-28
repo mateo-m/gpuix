@@ -572,6 +572,14 @@ pub(crate) fn build_div(
                     if consume {
                         cx.stop_propagation();
                     }
+                    // The lift starts the snap glide, and the window must
+                    // paint a frame for the glide to take its first step.
+                    // The momentum events after the lift are consumed, so
+                    // they schedule no paint on their own, and without this
+                    // the glide sits inert until the next input.
+                    if consume || event.touch_phase == gpui::TouchPhase::Ended {
+                        window.refresh();
+                    }
                 });
             }
 

@@ -349,6 +349,16 @@ fn insert_animation(id: u64, handle: &ScrollHandle, to: Point<Pixels>, curve: Cu
         to.y.max(-max.y).min(px(0.0)),
     );
     let from = handle.offset();
+    if *SNAP_DEBUG {
+        eprintln!(
+            "[snap] glide id={} from=({:.1},{:.1}) to=({:.1},{:.1})",
+            id,
+            f32::from(from.x),
+            f32::from(from.y),
+            f32::from(to.x),
+            f32::from(to.y),
+        );
+    }
     ANIMATIONS.with(|cell| {
         cell.borrow_mut().insert(
             id,
@@ -406,15 +416,37 @@ fn step_animations(handles: &HashMap<u64, ScrollHandle>, now: Instant) -> bool {
                 return false;
             };
             if handle.offset() != animation.written {
+                if *SNAP_DEBUG {
+                    eprintln!(
+                        "[snap] cancel id={} offset=({:.2},{:.2}) written=({:.2},{:.2})",
+                        id,
+                        f32::from(handle.offset().x),
+                        f32::from(handle.offset().y),
+                        f32::from(animation.written.x),
+                        f32::from(animation.written.y),
+                    );
+                }
                 return false;
             }
             let started = *animation.started.get_or_insert(now);
             let elapsed = (now - started).as_secs_f64();
+            if *SNAP_DEBUG {
+                eprintln!(
+                    "[snap] step id={} elapsed_ms={} offset=({:.1},{:.1})",
+                    id,
+                    (now - started).as_millis(),
+                    f32::from(handle.offset().x),
+                    f32::from(handle.offset().y),
+                );
+            }
             let t = match animation.curve {
                 Curve::Smooth => {
                     let raw = elapsed / SMOOTH_SECONDS;
                     if raw >= 1.0 {
                         handle.set_offset(animation.to);
+                        if *SNAP_DEBUG {
+                            eprintln!("[snap] land id={}", id);
+                        }
                         return false;
                     }
                     ease(raw.max(0.0), &smooth_ease())
@@ -425,6 +457,9 @@ fn step_animations(handles: &HashMap<u64, ScrollHandle>, now: Instant) -> bool {
                     let frame = elapsed / FLING_FRAME_SECONDS + 1.0;
                     if frame >= frames {
                         handle.set_offset(animation.to);
+                        if *SNAP_DEBUG {
+                            eprintln!("[snap] land id={}", id);
+                        }
                         return false;
                     }
                     (1.0 - FLING_RATIO.powf(frame)) / (1.0 - FLING_RATIO.powf(frames))
