@@ -545,8 +545,12 @@ fn build_frozen(
         highlight_events: &mut *ctx.highlight_events,
         vt: None,
         frozen: true,
+        direct_rules: Vec::new(),
+        descendant_rules: Vec::new(),
     };
-    let content = build_element(capture.root, &mut frozen_ctx, window, cx);
+    // A frozen copy builds outside the tree walk, so it has no child position
+    // and the index states do not apply to it.
+    let content = build_element(capture.root, None, &mut frozen_ctx, window, cx);
     // The shell fixes the copy at its captured size and carries this
     // frame's opacity down the whole copy.
     let mut shell = gpui::div()

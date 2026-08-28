@@ -15,6 +15,7 @@
 import type {
   ClassNameCache,
   ClassNameResolver,
+  SelectorRule,
   StyleDeclarations,
   StyleDesc,
 } from "../types/host.js"
@@ -84,11 +85,12 @@ type Mutable = Record<string, unknown>
 
 function mergeInto(target: Mutable, source: StyleDesc): void {
   for (const [key, value] of Object.entries(source)) {
-    if (key === "hover" || key === "active") continue
+    if (key === "hover" || key === "active" || key === "selectors") continue
     target[key] = value
   }
   mergeState(target, "hover", source.hover)
   mergeState(target, "active", source.active)
+  mergeSelectors(target, source.selectors)
 }
 
 function mergeState(
@@ -98,6 +100,23 @@ function mergeState(
 ): void {
   if (!source) return
   target[state] = { ...(target[state] as StyleDeclarations | undefined), ...source }
+}
+
+/// Two tokens on the same selector merge into one rule, the way two
+/// declarations in one CSS rule do, so `first:p-2 first:bg-red` sends one
+/// `:first-child` block.
+function mergeSelectors(target: Mutable, source: SelectorRule[] | undefined): void {
+  if (!source) return
+  const merged = [...((target.selectors as SelectorRule[] | undefined) ?? [])]
+  for (const rule of source) {
+    const at = merged.findIndex((held) => held.on === rule.on)
+    if (at === -1) {
+      merged.push({ on: rule.on, style: { ...rule.style } })
+    } else {
+      merged[at] = { on: rule.on, style: { ...merged[at]!.style, ...rule.style } }
+    }
+  }
+  target.selectors = merged
 }
 
 /// The style prop laid over the style a class string declared.
@@ -121,12 +140,26 @@ export function withInlineStyle(
   const active = fromClass.active ? { ...(fromClass.active as Mutable) } : undefined
   if (hover) merged.hover = hover
   if (active) merged.active = active
+  const selectors = fromClass.selectors?.map((rule) => ({
+    on: rule.on,
+    style: { ...rule.style } as Mutable,
+  }))
+  if (selectors) merged.selectors = selectors
 
   for (const [key, value] of Object.entries(inline)) {
     if (key === "hover" || key === "active") continue
     merged[key] = value
     if (hover) delete hover[key]
     if (active) delete active[key]
+    // The style prop outranks every selector, so a key it sets leaves the
+    // conditioned blocks too. Only the element's own states though: a rule
+    // on the children (`& > *`) styles other elements, and the inline style
+    // of this one says nothing about those.
+    if (selectors) {
+      for (const rule of selectors) {
+        if (!rule.on.startsWith("&")) delete rule.style[key]
+      }
+    }
   }
   mergeState(merged, "hover", inline.hover)
   mergeState(merged, "active", inline.active)
