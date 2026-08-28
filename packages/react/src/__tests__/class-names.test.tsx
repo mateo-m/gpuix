@@ -10,7 +10,7 @@ import React from "react"
 import { beforeAll, describe, expect, it } from "vitest"
 import { createTestRoot, hasNativeTestRenderer } from "../testing.js"
 import { expectScreenshotsEqual, SHOTS_DIR } from "./test-utils.js"
-import type { ClassNameResolver } from "../types/host.js"
+import type { ClassNameResolver, StyleDesc } from "../types/host.js"
 
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
@@ -95,5 +95,186 @@ describeNative("className", () => {
     renderer.resetStyleResolutions()
     render(<div className="box bg-red" />)
     expect(renderer.styleResolutions()).toBe(0)
+  })
+})
+
+/// The index and child conditions, painted. Each test renders the class form
+/// and the same picture written as inline styles, and compares the pixels.
+const CONDITIONS: Record<string, StyleDesc> = {
+  stack: { width: 200, height: 160, display: "flex", flexDirection: "column" },
+  cell: { height: 30, backgroundColor: "#222222" },
+  "first-red": {
+    selectors: [{ on: ":first-child", style: { backgroundColor: "#ff0000" } }],
+  },
+  "last-blue": {
+    selectors: [{ on: ":last-child", style: { backgroundColor: "#0000ff" } }],
+  },
+  "odd-red": {
+    selectors: [{ on: ":nth-child(odd)", style: { backgroundColor: "#ff0000" } }],
+  },
+  "even-blue": {
+    selectors: [{ on: ":nth-child(even)", style: { backgroundColor: "#0000ff" } }],
+  },
+  spaced: {
+    selectors: [{ on: "& > :not(:last-child)", style: { marginBottom: 10 } }],
+  },
+  "kids-green": {
+    selectors: [{ on: "& > *", style: { backgroundColor: "#00ff00" } }],
+  },
+  "deep-green": {
+    selectors: [{ on: "& *", style: { backgroundColor: "#00ff00" } }],
+  },
+}
+
+const resolveCondition: ClassNameResolver = (token) => CONDITIONS[token] ?? null
+
+function paintConditions(name: string, tree: React.ReactElement, withResolver = true) {
+  const root = createTestRoot(withResolver ? { resolveClassName: resolveCondition } : {})
+  root.render(tree)
+  root.renderer.captureScreenshot(shot(name))
+  root.unmount()
+}
+
+describeNative("selector conditions", () => {
+  const STACK = CONDITIONS.stack as Record<string, unknown>
+  const CELL = { height: 30 } as const
+
+  it("paints first and last from the child position", () => {
+    paintConditions(
+      "index",
+      <div className="stack">
+        <div className="cell first-red last-blue" />
+        <div className="cell first-red last-blue" />
+        <div className="cell first-red last-blue" />
+      </div>
+    )
+    paintConditions(
+      "index-direct",
+      <div style={STACK}>
+        <div style={{ ...CELL, backgroundColor: "#ff0000" }} />
+        <div style={{ ...CELL, backgroundColor: "#222222" }} />
+        <div style={{ ...CELL, backgroundColor: "#0000ff" }} />
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("index"), shot("index-direct"))
+  })
+
+  it("stripes odd and even, counting from one", () => {
+    paintConditions(
+      "stripes",
+      <div className="stack">
+        <div className="cell odd-red even-blue" />
+        <div className="cell odd-red even-blue" />
+        <div className="cell odd-red even-blue" />
+      </div>
+    )
+    paintConditions(
+      "stripes-direct",
+      <div style={STACK}>
+        <div style={{ ...CELL, backgroundColor: "#ff0000" }} />
+        <div style={{ ...CELL, backgroundColor: "#0000ff" }} />
+        <div style={{ ...CELL, backgroundColor: "#ff0000" }} />
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("stripes"), shot("stripes-direct"))
+  })
+
+  it("re-evaluates the position when the list changes", () => {
+    const root = createTestRoot({ resolveClassName: resolveCondition })
+    const rows = (count: number) => (
+      <div className="stack">
+        {Array.from({ length: count }, (_, at) => (
+          <div key={at} className="cell last-blue" />
+        ))}
+      </div>
+    )
+    root.render(rows(2))
+    root.render(rows(3))
+    root.renderer.captureScreenshot(shot("grown"))
+    root.unmount()
+
+    paintConditions(
+      "grown-direct",
+      <div style={STACK}>
+        <div style={{ ...CELL, backgroundColor: "#222222" }} />
+        <div style={{ ...CELL, backgroundColor: "#222222" }} />
+        <div style={{ ...CELL, backgroundColor: "#0000ff" }} />
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("grown"), shot("grown-direct"))
+  })
+
+  it("spaces every child except the last from a rule on the parent", () => {
+    paintConditions(
+      "spaced",
+      <div className="stack spaced">
+        <div className="cell" />
+        <div className="cell" />
+        <div className="cell" />
+      </div>
+    )
+    paintConditions(
+      "spaced-direct",
+      <div style={STACK}>
+        <div style={{ ...CELL, backgroundColor: "#222222", marginBottom: 10 }} />
+        <div style={{ ...CELL, backgroundColor: "#222222", marginBottom: 10 }} />
+        <div style={{ ...CELL, backgroundColor: "#222222" }} />
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("spaced"), shot("spaced-direct"))
+  })
+
+  it("lets a child's own declaration beat a rule from the parent", () => {
+    // `& > *` compiles from `:where()`, which has specificity zero. The first
+    // child declares no background, so the rule paints it. The second and the
+    // third declare their own, through a class and through the style prop, and
+    // each keeps it.
+    paintConditions(
+      "kids",
+      <div className="stack kids-green">
+        <div style={{ height: 30 }} />
+        <div className="cell" />
+        <div className="cell" style={{ backgroundColor: "#0000ff" }} />
+      </div>
+    )
+    paintConditions(
+      "kids-direct",
+      <div style={STACK}>
+        <div style={{ ...CELL, backgroundColor: "#00ff00" }} />
+        <div style={{ ...CELL, backgroundColor: "#222222" }} />
+        <div style={{ ...CELL, backgroundColor: "#0000ff" }} />
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("kids"), shot("kids-direct"))
+  })
+
+  it("reaches a grandchild through a descendant rule", () => {
+    // The wrapper declares no background, so the rule paints it. The cell
+    // declares its own, which wins.
+    paintConditions(
+      "deep",
+      <div className="stack deep-green">
+        <div style={{ padding: 10 }}>
+          <div className="cell" />
+          <div style={{ height: 30 }} />
+        </div>
+      </div>
+    )
+    paintConditions(
+      "deep-direct",
+      <div style={STACK}>
+        <div style={{ padding: 10, backgroundColor: "#00ff00" }}>
+          <div style={{ ...CELL, backgroundColor: "#222222" }} />
+          <div style={{ height: 30, backgroundColor: "#00ff00" }} />
+        </div>
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("deep"), shot("deep-direct"))
   })
 })
