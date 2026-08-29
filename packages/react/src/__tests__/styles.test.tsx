@@ -2089,7 +2089,9 @@ describeNative("motion", () => {
     expect(renderer.pixelAt(150, 150)[0]).toBeGreaterThan(240)
   })
 
-  it("ramps the backdrop blur radius with the mask value", () => {
+  // The contrast reads make 54 pixel readbacks. On the Windows CI
+  // rasterizer they take over 6 seconds, past the 5 second default.
+  it("ramps the backdrop blur radius with the mask value", { timeout: 20_000 }, () => {
     const { render, renderer } = createTestRoot()
     const cells = []
     for (let i = 0; i < 16; i++) {
