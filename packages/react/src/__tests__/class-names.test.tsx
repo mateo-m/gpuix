@@ -277,4 +277,44 @@ describeNative("selector conditions", () => {
     )
     expectScreenshotsEqual(shot("deep"), shot("deep-direct"))
   })
+
+  it("keeps a descendant rule off the raw text inside a text element", () => {
+    // The reconciler turns a raw string child into an anonymous text node.
+    // The web gives a text node no box, so `& *` must not paint it.
+    paintConditions(
+      "raw-deep",
+      <div className="stack deep-green">
+        <text style={{ backgroundColor: "#0000ff", color: "#ffffff", padding: 10 }}>HELLO</text>
+      </div>
+    )
+    paintConditions(
+      "raw-deep-direct",
+      <div style={STACK}>
+        <text style={{ backgroundColor: "#0000ff", color: "#ffffff", padding: 10 }}>HELLO</text>
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("raw-deep"), shot("raw-deep-direct"))
+  })
+
+  it("does not count a raw string sibling in the child positions", () => {
+    paintConditions(
+      "raw-index",
+      <div className="stack">
+        {"loose"}
+        <div className="cell first-red last-blue" />
+        <div className="cell first-red last-blue" />
+      </div>
+    )
+    paintConditions(
+      "raw-index-direct",
+      <div style={STACK}>
+        {"loose"}
+        <div style={{ ...CELL, backgroundColor: "#ff0000" }} />
+        <div style={{ ...CELL, backgroundColor: "#0000ff" }} />
+      </div>,
+      false
+    )
+    expectScreenshotsEqual(shot("raw-index"), shot("raw-index-direct"))
+  })
 })

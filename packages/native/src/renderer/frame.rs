@@ -222,13 +222,11 @@ pub(super) fn build_element(
                 .copied()
                 .filter(|child_id| ctx.tree.elements.contains_key(child_id))
                 .collect();
-            let count = present.len();
+            let positions = child_positions(ctx.tree, &present);
             let custom_children: Vec<gpui::AnyElement> = present
                 .into_iter()
-                .enumerate()
-                .map(|(index, child_id)| {
-                    build_element(child_id, Some((index, count)), ctx, window, cx)
-                })
+                .zip(positions)
+                .map(|(child_id, position)| build_element(child_id, position, ctx, window, cx))
                 .collect();
             ctx.direct_rules = saved_direct;
             let cascade = ctx.cascade.clone();
@@ -839,9 +837,9 @@ pub(crate) fn build_div(
         .copied()
         .filter(|child_id| ctx.tree.elements.contains_key(child_id))
         .collect();
-    let count = child_ids.len();
-    for (index, child_id) in child_ids.into_iter().enumerate() {
-        let child = build_element(child_id, Some((index, count)), ctx, window, cx);
+    let positions = child_positions(ctx.tree, &child_ids);
+    for (child_id, position) in child_ids.into_iter().zip(positions) {
+        let child = build_element(child_id, position, ctx, window, cx);
         el = if overflow_x_only {
             el.child(gpui::div().flex_none().child(child))
         } else {
@@ -867,6 +865,34 @@ fn add_pixels(length: Option<gpui::DefiniteLength>, extra: gpui::Pixels) -> gpui
         }
         _ => extra.into(),
     }
+}
+
+/// Whether this element is the anonymous node the reconciler makes for a raw
+/// string child. The web gives a text node no box of its own: `*` never
+/// matches one, and `:nth-child` does not count one.
+fn is_raw_text(element: &crate::retained_tree::RetainedElement) -> bool {
+    element.element_type == "text" && element.content.is_some() && element.style.is_none()
+}
+
+/// The `:nth-child` position of each child. Raw text nodes get `None` and do
+/// not count.
+fn child_positions(tree: &RetainedTree, child_ids: &[u64]) -> Vec<Option<(usize, usize)>> {
+    let raw: Vec<bool> = child_ids
+        .iter()
+        .map(|child_id| tree.elements.get(child_id).is_some_and(is_raw_text))
+        .collect();
+    let count = raw.iter().filter(|flag| !**flag).count();
+    let mut index = 0;
+    raw.into_iter()
+        .map(|flag| {
+            if flag {
+                return None;
+            }
+            let position = Some((index, count));
+            index += 1;
+            position
+        })
+        .collect()
 }
 
 /// Merge the rules ancestors put on this element, under its own declarations.
@@ -998,7 +1024,10 @@ pub(crate) fn build_text(
     // text-only subset, so `padding`, `width` and every layout prop on a text
     // node were silently dropped — a hole with no error and no warning.
     let mut el = gpui::div();
-    el = apply_child_rules(el, position, ctx);
+    // A raw text node is not an element to CSS, so no rule reaches it.
+    if !is_raw_text(element) {
+        el = apply_child_rules(el, position, ctx);
+    }
     if let Some(resolved) = resolved.as_ref() {
         el = crate::style::resolve::apply_resolved(el, &resolved.base);
         for (state, declared) in &resolved.states {
@@ -1032,9 +1061,9 @@ pub(crate) fn build_text(
         .copied()
         .filter(|child_id| ctx.tree.elements.contains_key(child_id))
         .collect();
-    let count = child_ids.len();
-    for (index, child_id) in child_ids.into_iter().enumerate() {
-        el = el.child(build_element(child_id, Some((index, count)), ctx, window, cx));
+    let positions = child_positions(ctx.tree, &child_ids);
+    for (child_id, position) in child_ids.into_iter().zip(positions) {
+        el = el.child(build_element(child_id, position, ctx, window, cx));
     }
     pop_child_rules(saved_direct, pushed, ctx);
 
