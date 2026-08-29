@@ -334,6 +334,11 @@ describeNative("the scrollbars panel", () => {
       </div>
     )
     const box = test.renderer.findByTestId("two-axes-box")!
+    // The box is the third panel of the stack, near the bottom of the
+    // window, and a wheel outside the window moves nothing. Put the box
+    // in the middle first.
+    test.renderer.scrollIntoView(box.id, "center")
+    test.renderer.flush()
     const [x, y, width] = test.renderer.getElementBounds(box.id)!
     // The content must be wider than the box even on a wide window.
     const inner = test.renderer.findByTestId("two-axes-inner")!
