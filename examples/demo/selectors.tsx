@@ -42,7 +42,7 @@ function GrowingList() {
       <div className="col rounded border" style={{ width: 260 }}>
         {Array.from({ length: count }, (_, at) => (
           <div key={at} className={`${ROW} first:bg-brand-soft last:bg-brand only:bg-raised`}>
-            <text className="text-sm text-fg">row {at + 1}</text>
+            <text className="text-sm text-fg">{`row ${at + 1}`}</text>
           </div>
         ))}
       </div>
