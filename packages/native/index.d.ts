@@ -5,29 +5,6 @@ export declare class GpuixRenderer {
   constructor(eventCallback?: (((err: Error | null, arg: EventPayload) => any)) | undefined | null)
   /** Initialize GPUI using the native event-loop architecture for this OS. */
   init(options?: WindowOptions | undefined | null): void
-  createElement(id: number, elementType: string): void
-  /**
-   * Destroy an element and all descendants. Returns array of destroyed IDs
-   * so JS can clean up event handlers for the entire subtree.
-   */
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  /** Set the root element (called from appendChildToContainer). */
-  setRoot(id: number): void
-  /**
-   * Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-   * Key is the prop name, value is JSON-encoded.
-   */
-  setCustomProp(id: number, key: string, valueJson: string): void
-  /** Get a custom prop value from an element. Returns JSON string or null. */
-  getCustomProp(id: number, key: string): string | null
-  /** Signal that a batch of mutations is complete. Triggers re-render. */
-  commitMutations(): void
   /**
    * Apply a batch of mutations in a single FFI call.
    *
@@ -38,14 +15,12 @@ export declare class GpuixRenderer {
    *   ["createElement",    id, "type"]
    *   ["destroyElement",   id]
    *   ["appendChild",      parentId, childId]
-   *   ["removeChild",      parentId, childId]
    *   ["insertBefore",     parentId, childId, beforeId]
-   *   ["setStyle",         id, { ...style } | "{styleJson}"]
+   *   ["setStyle",         id, { ...style }]
    *   ["setText",          id, "content"]
    *   ["setEventListener", id, "eventType", true|false]
    *   ["setRoot",          id]
-   *   ["setCustomProp",      id, "key", value | "{valueJson}"]
-   *   ["setCustomPropValue", id, "key", value]
+   *   ["setCustomProp",    id, "key", value]
    *
    * Returns accumulated destroyed IDs from all destroyElement ops.
    * Acquires the tree mutex ONCE for the entire batch.
@@ -54,7 +29,13 @@ export declare class GpuixRenderer {
   /** Pump the native event loop. Returns false after the last window closes. */
   tick(): boolean
   isInitialized(): boolean
-  /** Whether JavaScript must drive the native event loop with tick(). */
+  /**
+   * Whether JavaScript must call tick() until it returns false.
+   *
+   * macOS: tick() pumps AppKit. Windows/Linux: tick() only reports whether
+   * the UI thread is still inside `Platform::run`. Both return false after
+   * the last window closes so the JS frame loop can exit the process.
+   */
   requiresTick(): boolean
   /**
    * The paintable size of the window in logical pixels, excluding any
@@ -89,6 +70,12 @@ export declare class GpuixRenderer {
   activateWindow(): void
   setWindowTitle(title: string): void
   focusElement(elementId: number): void
+  /** Move focus to the next GPUI tab stop. */
+  focusNext(): void
+  /** Move focus to the previous GPUI tab stop. */
+  focusPrevious(): void
+  /** Enable the window key events requested by the React renderer. */
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   blur(): void
   /** The current text selection joined in document order, or null. */
   getSelectedText(): string | null
@@ -163,9 +150,7 @@ export declare class GpuixRenderer {
  *
  * Usage from JS:
  *   const r = new TestGpuixRenderer()
- *   r.createElement(1, "div")
- *   r.setRoot(1)
- *   r.commitMutations()
+ *   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
  *   r.flush()                  // triggers GpuixView::render() on the GPU
  *   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
  *   const events = r.drainEvents()
@@ -173,12 +158,6 @@ export declare class GpuixRenderer {
  */
 export declare class TestGpuixRenderer {
   constructor(width?: number | undefined | null, height?: number | undefined | null)
-  createElement(id: number, elementType: string): void
-  /**
-   * Destroy an element and all descendants. Returns destroyed IDs
-   * so JS can clean up event handlers.
-   */
-  destroyElement(id: number): Array<number>
   /**
    * How many elements the retained tree holds, reachable from the root or
    * not. `getTreeJson` walks from the root, so it cannot see a node that was
@@ -186,23 +165,6 @@ export declare class TestGpuixRenderer {
    * removal actually freed it.
    */
   getRetainedElementCount(): number
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  /** Set the root element (called from appendChildToContainer). */
-  setRoot(id: number): void
-  /** Set a custom prop on an element (for non-div/text elements like input, editor, diff). */
-  setCustomProp(id: number, key: string, valueJson: string): void
-  /** Get a custom prop value from an element. */
-  getCustomProp(id: number, key: string): string | null
-  /**
-   * Signal that a batch of mutations is complete.
-   * In tests, this is a no-op — flush() handles the actual re-render.
-   */
-  commitMutations(): void
   /**
    * How many styles the renderer has resolved since the last reset.
    *
@@ -269,6 +231,9 @@ export declare class TestGpuixRenderer {
    * Call flush() before this so the element tree and focus handles exist.
    */
   focusElement(id: number): void
+  focusNext(): void
+  focusPrevious(): void
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   /**
    * Simulate a mouse down event at the given window coordinates.
    * Button: 0=left, 1=middle, 2=right. Defaults to left (0).
@@ -400,6 +365,8 @@ export declare class TestGpuixRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
+  /** Advance GPUI's deterministic test executor and run due timers. */
+  advanceTime(milliseconds: number): void
   /** Get the root element ID, or null if no root is set. */
   getRootId(): number | null
   /**
@@ -532,6 +499,9 @@ export interface EventPayload {
   matchCount?: number
   modifiers?: EventModifiers
 }
+
+/** True only when this binary compiled the real GPU test renderer. */
+export declare function hasTestGpuixRenderer(): boolean
 
 /**
  * One highlight wash painted in the last frame, with the boxes it drew.

@@ -11,10 +11,12 @@
 /// JSX types now resolve to GPUIX's Props via jsxImportSource in tsconfig.
 
 import fs from "fs"
+import { spawnSync } from "node:child_process"
 import { describe, it, expect, beforeEach } from "vitest"
 import React, { useState, useRef } from "react"
 import { createTestRoot, hasNativeTestRenderer } from "../testing"
 import { startFrameLoop } from "../reconciler/renderer.js"
+import { motion } from "../index"
 import type { EventPayload } from "@gpuix/native"
 import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils"
 
@@ -22,6 +24,32 @@ import { expectScreenshotsDiffer, SHOTS_DIR } from "./test-utils"
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describe("frame loop", () => {
+  it.skipIf(process.platform !== "darwin")(
+    "returns control to JavaScript while AppKit is idle",
+    () => {
+      const script = [
+        'import { GpuixRenderer } from "@gpuix/native"',
+        "const renderer = new GpuixRenderer(() => {})",
+        "renderer.init({ focus: false })",
+        "renderer.tick()",
+        "const startedAt = performance.now()",
+        "for (let index = 0; index < 30; index += 1) renderer.tick()",
+        "console.log(performance.now() - startedAt)",
+        "process.exit(0)",
+      ].join("\n")
+      const result = spawnSync(
+        process.execPath,
+        ["-e", script],
+        { encoding: "utf8", timeout: 3_000 },
+      )
+
+      expect(result.status, result.stderr || result.error?.message).toBe(0)
+      const elapsedMs = Number(result.stdout.trim())
+      expect(elapsedMs).not.toBeNaN()
+      expect(elapsedMs).toBeLessThan(200)
+    },
+  )
+
   it("does not tick when the native platform owns its event loop", () => {
     let ticks = 0
     const loop = startFrameLoop({
@@ -94,6 +122,30 @@ describe("frame loop", () => {
     expect(terminated).toBe(1)
     loop.stop()
   })
+
+  it("keeps ticking until a later false, then exits once", async () => {
+    let ticks = 0
+    let terminated = 0
+    const loop = startFrameLoop(
+      {
+        requiresTick: () => true,
+        tick: () => {
+          ticks += 1
+          return ticks < 3
+        },
+      },
+      {
+        frameMs: 5,
+        onTerminated: () => {
+          terminated += 1
+        },
+      },
+    )
+    await new Promise((resolve) => setTimeout(resolve, 40))
+    expect(ticks).toBe(3)
+    expect(terminated).toBe(1)
+    loop.stop()
+  })
 })
 
 describeNative("events", () => {
@@ -141,6 +193,80 @@ describeNative("events", () => {
           "Count: 2",
         ]
       `)
+    })
+
+    it("synthesizes click only for the primary button", () => {
+      const received: string[] = []
+      testRoot.render(
+        <div
+          style={{ width: 200, height: 50 }}
+          onMouseDown={(event) => received.push(`down:${event.button}`)}
+          onMouseUp={(event) => received.push(`up:${event.button}`)}
+          onClick={(event) => received.push(`click:${event.button}:${event.isRightClick}`)}
+        />,
+      )
+
+      for (const button of [1, 2]) {
+        testRoot.renderer.nativeSimulateMouseDown(10, 10, button)
+        testRoot.renderer.nativeSimulateMouseUp(10, 10, button)
+      }
+      expect(received).toEqual(["down:1", "up:1", "down:2", "up:2"])
+
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(received).toEqual([
+        "down:1",
+        "up:1",
+        "down:2",
+        "up:2",
+        "down:0",
+        "up:0",
+        "click:0:false",
+      ])
+    })
+
+    it("dispatches primary clicks from motion elements", () => {
+      let clicks = 0
+      testRoot.render(
+        <motion.div
+          initial={false}
+          animate={{ width: 200 }}
+          style={{ width: 200, height: 50 }}
+          onClick={() => {
+            clicks += 1
+          }}
+        />,
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 0)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 0)
+      expect(clicks).toBe(1)
+      testRoot.renderer.nativeSimulateMouseDown(10, 10, 2)
+      testRoot.renderer.nativeSimulateMouseUp(10, 10, 2)
+      expect(clicks).toBe(1)
+    })
+
+    it("dispatches primary clicks from native custom elements", () => {
+      const clicks: EventPayload[] = []
+      testRoot.render(
+        <div style={{ display: "flex", padding: 20 }}>
+          <code
+            code="hello"
+            language="ts"
+            onClick={(event) => {
+              clicks.push(event)
+            }}
+          />
+        </div>,
+      )
+
+      testRoot.renderer.nativeSimulateMouseDown(30, 28, 0)
+      testRoot.renderer.nativeSimulateMouseUp(30, 28, 0)
+      expect(clicks).toHaveLength(1)
+      expect(clicks[0]).toMatchObject({ button: 0, isRightClick: false })
+      testRoot.renderer.nativeSimulateMouseDown(30, 28, 2)
+      testRoot.renderer.nativeSimulateMouseUp(30, 28, 2)
+      expect(clicks).toHaveLength(1)
     })
   })
 

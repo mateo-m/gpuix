@@ -27,7 +27,8 @@ bun run dev
 ```
 
 `@gpuix/react` pulls the native renderer for your platform. Edit `app.tsx` and
-the running window remounts on save.
+the running window remounts on save. Click and keyboard handlers switch to the
+new tree without recreating the window.
 
 ### Build from scratch
 
@@ -136,6 +137,7 @@ gpuix completions install
 | Example | Run | What it shows |
 |---|---|---|
 | **todo** | `bun run dev` in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
+| **blurred window** | `bun run blurred-window` | A macOS frosted-glass surface using GPUI's native vibrancy backdrop and transparent titlebar |
 | **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
@@ -158,9 +160,8 @@ The archive keeps the executable bit, so there is no `chmod` step. macOS may sti
 On Windows, download `example-chat-x86_64-pc-windows-msvc.exe` and double-click it. On Linux, the file is `example-chat-x86_64-unknown-linux-gnu.tar.gz`.
 
 The web example bundles the same React app and reconciler as the desktop chat
-example. wasm-bindgen exposes the mutation interface to the existing retained
-tree and `GpuixView`, which run through GPUI's browser platform. Browser event
-callbacks are not supported yet.
+example. wasm-bindgen exposes mutations and event callbacks to the existing
+retained tree and `GpuixView`, which run through GPUI's browser platform.
 
 The web build needs nightly Rust and the matching wasm-bindgen CLI:
 
@@ -228,7 +229,7 @@ Markdown, code and a virtualized diff in one frame:
 
 ## Architecture
 
-GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps use napi-rs; browser apps load the same Rust renderer through wasm-bindgen. React's reconciler sends individual DOM-like mutations (`createElement`, `appendChild`, `setStyle`, etc.) directly to Rust, with no JSON tree serialization. Rust maintains a retained element tree that GPUI reads each frame.
+GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps use napi-rs; browser apps load the same Rust renderer through wasm-bindgen. React collects changed elements into one atomic mutation batch per commit. Rust applies that batch to a retained element tree that GPUI reads each frame.
 
 ```
 ┌─────────────────────────────────────────────────────────────────┐
@@ -246,10 +247,11 @@ GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps us
 │  }                                                              │
 └─────────────────────────────────────────────────────────────────┘
                     │ napi desktop / wasm-bindgen browser
-                    │ createElement(1, "div")
-                    │ appendChild(0, 1)
-                    │ setStyle(1, "{...}")
-                    │ commitMutations()
+                    │ applyBatch([
+                    │   ["createElement", 1, "div"],
+                    │   ["setStyle", 1, {...}],
+                    │   ["setRoot", 1]
+                    │ ])
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  Rust host bridge                                               │
@@ -257,14 +259,14 @@ GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps us
 │  RetainedTree ── stores elements, styles, event flags           │
 │       │                                                         │
 │       ▼  each GPUI frame                                        │
-│  GpuixView::render() → build_element() → GPUI elements         │
+│  GpuixView::render() → build_element() → GPUI elements          │
 └─────────────────────────────────────────────────────────────────┘
                     │
                     ▼
 ┌─────────────────────────────────────────────────────────────────┐
 │  GPUI                                                           │
 │                                                                 │
-│  Metal, DirectX, Vulkan, or browser WebGPU / WebGL2              │
+│  Metal, DirectX, Vulkan, or browser WebGPU / WebGL2             │
 │  Flexbox layout via Taffy                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
@@ -273,8 +275,8 @@ GPUIX bridges React to GPUI using a **mutation-based protocol**. Desktop apps us
 
 GPUI is an **immediate-mode** UI framework — it rebuilds the entire element tree every frame. Instead of fighting this, GPUIX embraces it:
 
-1. React reconciler detects a state change and calls host mutations (`createElement`, `setStyle`, `appendChild`, etc.)
-2. Each mutation updates a **RetainedTree** on the Rust side — a HashMap of element nodes with styles, children, and event flags
+1. React reconciler detects a state change and queues host mutations (`createElement`, `setStyle`, `appendChild`, etc.)
+2. `applyBatch()` validates and applies the complete commit to the Rust **RetainedTree**
 3. On each GPUI frame, `GpuixView::render()` walks the RetainedTree and calls `build_element()` to produce ephemeral GPUI elements
 4. GPUI lays them out (Taffy flexbox) and renders to the GPU
 5. Only **changed elements** cross the FFI boundary — React's reconciler diffs the virtual tree and sends minimal mutations
@@ -283,28 +285,20 @@ This is the same protocol React uses for the DOM (`createElement`, `appendChild`
 
 ## Mutation API
 
-The host surface between JS and Rust is the `NativeRenderer` interface. Desktop uses napi calls and the browser uses wasm-bindgen methods:
+The mutation surface between JS and Rust is one atomic method. Desktop uses napi and the browser uses wasm-bindgen:
 
 ```ts
 interface NativeRenderer {
-  createElement(id: number, elementType: string): void
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  setRoot(id: number): void
-  commitMutations(): void
+  applyBatch(json: string): Array<number>
 }
 ```
 
-Element IDs are plain numbers generated by an incrementing counter in JS. React may abandon work in concurrent render mode, so GPUIX keeps new host nodes in JS until React places the accepted subtree during commit. Only then are its mutations added to the batch. `commitMutations()` flushes that accepted commit and marks the Rust view dirty for the next frame.
+Element IDs are plain numbers generated by an incrementing counter in JS. React may abandon work in concurrent render mode, so GPUIX keeps new host nodes in JS until React places the accepted subtree during commit. Only then are its mutations added to the batch. `applyBatch()` applies that accepted commit atomically and marks the Rust view dirty for the next frame.
 
 ## Event Flow
 
-On desktop, events travel from GPUI back to React through a `ThreadsafeFunction` callback. Browser event callbacks are not connected yet.
+Events travel from GPUI back to React through a `ThreadsafeFunction` on desktop
+and a wasm-bindgen callback in the browser.
 
 ```
 User clicks element id=3
@@ -316,7 +310,7 @@ GPUI fires on_click on the element
 Rust closure calls emit_event_full(callback, 3, "click", {x, y, ...})
        │
        ▼
-ThreadsafeFunction queues EventPayload on Node.js event loop
+Desktop ThreadsafeFunction / browser callback sends EventPayload
        │
        ▼
 JS event registry: eventHandlers.get(3)?.get("click")?.(payload)
@@ -545,23 +539,19 @@ surface, so both work while the window sits behind your editor, and even on a
   agent ──►  launch({ env: { GPUIX_BACKGROUND: '1' } })
                 │
                 ▼
-          GPU window renders and paints, but never activates
+           GPU window renders and paints without activation
                 │
                 ├──►  getByTestId(..).click()   ✓  hits the last painted bounds
                 ├──►  screenshot({ path })      ✓  reads the GPU surface
-                ├──►  fill() / press()          ✗  keystrokes are not live yet
+                ├──►  fill() / press()          ✓  uses the live input pipeline
                 └──►  close()
 
   you   ──►  keep typing, your editor stays frontmost the whole time
 ```
 
-Two limits to know before you rely on it:
-
-- **Keyboard input does not reach a launched process.** `fill()` and `press()`
-  throw `keystrokes are not live yet`, because the live renderer implements no
-  `simulateKeystrokes`. This is not about focus; it fails on a focused window
-  too. Use `createTestRoot()` when a check needs typing
-- **Linux ignores `focus`**, so an agent there still gets a focused window
+`fill()` and `press()` use the live GPUI window input pipeline. They work
+without activating the desktop window. **Linux ignores `focus`**, so an agent
+there still gets a focused window.
 
 Prefer `createTestRoot()` when you can. It opens **no window at all**, so
 nothing can steal focus and keyboard input works. Reach for `launch()` plus
@@ -684,8 +674,10 @@ This is a remount, not React Refresh. Keeping hook state needs Bun to inject
 Native `.node` edits still need a rebuild. See [Developing the Rust side](#developing-the-rust-side).
 
 On **macOS**, `startFrameLoop` calls `renderer.tick()` at a fixed rate (~125fps by
-default). This pumps AppKit on the process main thread without blocking Node. Pass
-`{ frameMs }` to change the rate, and call `.stop()` on the returned handle to end it.
+default). Each tick drains only ready AppKit events and Core Foundation sources,
+then returns without waiting for the next native wake. Bun timers, sockets, promises,
+and PTY callbacks can run between ticks. Pass `{ frameMs }` to change the rate, and
+call `.stop()` on the returned handle to end it.
 
 On **Windows and Linux**, GPUI runs its normal blocking native event loop on one
 dedicated Rust UI thread. Node sends in-process commands to that thread, so
@@ -1308,8 +1300,8 @@ Retained element ID ► persistent gpui::FocusHandle ► keyboard/action dispatc
       React rerenders
 ```
 
-Inputs and textareas join the normal tab order automatically. Add `tabIndex` to
-a `div` when it should receive keyboard focus:
+Inputs and textareas are tab stops automatically. Add `tabIndex` to a `div` when
+it should participate in explicit focus traversal:
 
 ```tsx
 <div
@@ -1326,14 +1318,61 @@ a `div` when it should receive keyboard focus:
 
 | Prop | Behavior |
 |---|---|
-| `tabIndex={0}` | Joins the normal Tab order |
+| `tabIndex={0}` | Joins the normal focus traversal order |
 | `tabIndex={n}` | Uses `n` as its GPUI tab-order index |
-| `tabIndex={-1}` | Skipped by Tab, but focusable by click or renderer API |
+| `tabIndex={-1}` | Skipped by focus traversal, but focusable by click or renderer API |
 | `autoFocus` | Takes focus once, when its native focus handle is created |
 
-`Tab` calls GPUI's `window.focus_next()`. `Shift+Tab` calls
-`window.focus_prev()`. This navigation stays in Rust and does not make a
-JavaScript round trip.
+### Element keyboard callbacks
+
+`onKeyDown` fires for the focused element and then for ancestors that declare
+`onKeyDown`, following GPUI's focus dispatch path. `onKeyUp` follows the same
+path when the key is released. Adding either callback creates the element's
+native focus handle.
+
+```tsx
+<div
+  autoFocus
+  tabIndex={0}
+  onKeyDown={(event) => {
+    console.log(event.key, event.keyChar, event.modifiers, event.isHeld)
+  }}
+  onKeyUp={(event) => {
+    console.log(`${event.key} released`)
+  }}
+>
+  Focused target
+</div>
+```
+
+GPUI dispatches matching key actions before raw keyboard callbacks. If an
+action consumes the key, `onKeyDown` does not fire. GPUIX does not bind `Tab` or
+`Shift+Tab`, so both reach element callbacks. Editors and terminals can send
+them directly to their input backend.
+
+### Renderer keyboard callbacks
+
+Pass `onKeyDown` or `onKeyUp` to `render()` for an opt-in window-level listener.
+The renderer callback fires after element callbacks for raw keys that no GPUI
+action consumed. It receives the renderer as its second argument:
+
+```tsx
+render(<App />, {
+  onKeyDown(event, renderer) {
+    if (event.key !== 'tab') return
+    if (event.modifiers?.shift) renderer.focusPrevious?.()
+    else renderer.focusNext?.()
+  },
+})
+```
+
+These callbacks observe native events. They do not expose GPUI's propagation
+control, so they cannot cancel or stop the native event.
+
+### Imperative focus
+
+`focusNext()` and `focusPrevious()` map directly to GPUI's
+`window.focus_next()` and `window.focus_prev()`.
 
 Use a ref for imperative focus:
 
@@ -1348,8 +1387,8 @@ function focusButton() {
 ```
 
 Adding `onKeyDown`, `onKeyUp`, `onFocus`, or `onBlur` creates a persistent focus
-handle. Add `tabIndex` as well when the element must be reachable with Tab.
-Removing `tabIndex` removes the element from the tab order.
+handle. Add `tabIndex` as well when the element must be reachable through focus
+traversal. Removing `tabIndex` removes the element from that order.
 
 ## Headless controls
 
@@ -1908,20 +1947,21 @@ Bash, TOML, YAML, Markdown, HTML, CSS, C.
 | `input`         | Native single-line text editor                   |
 | `textarea`      | Native multiline, auto-growing text editor       |
 | `virtual-list`  | Long collections; only visible rows are built    |
-| `img`           | Local raster or SVG images                       |
+| `img`           | Local/data URL raster or SVG images               |
 | `svg`           | Tintable monochrome SVG icons from source or disk |
 | `anchored`      | Positioned overlay                               |
 | `canvas`        | Custom drawing (planned)                         |
 
 ## Images and icons
 
-`<img>` takes a **filesystem path**, not a URL. Resolve the file with
-`fileURLToPath` or `path.join` and pass that string as `src`.
+`<img>` takes a **filesystem path or data URL**. Resolve local files with
+`fileURLToPath` or `path.join`, or encode in-memory bytes as base64.
 
 ### `<img>`
 
 `<img>` paints through GPUI's image element. It loads **PNG, JPEG, WebP, GIF,
-and SVG** from disk. SVG here is a full-colour image, not a tintable icon.
+SVG, BMP, TIFF, ICO, and Netpbm** from disk or data URLs. SVG here is a
+full-colour image, not a tintable icon.
 
 ```tsx
 <img
@@ -1930,6 +1970,15 @@ and SVG** from disk. SVG here is a full-colour image, not a tintable icon.
   style={{ width: 240, height: 140, borderRadius: 12 }}
 />
 ```
+
+```tsx
+const src = `data:image/png;base64,${Buffer.from(pngBytes).toString('base64')}`
+
+<img src={src} style={{ width: 240, height: 140 }} />
+```
+
+Data URLs support every image format listed above. Base64 and percent-encoded
+payloads are accepted.
 
 `objectFit` matches CSS: `"contain"` (default), `"cover"`, `"fill"`,
 `"scaleDown"`, or `"none"`. An empty `src` or a failed load shows a fallback
@@ -1999,8 +2048,8 @@ text imports no longer need a runtime flag.
 
 | Event | Props | Payload fields |
 |-------|-------|----------------|
-| Click | `onClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
-| Aux click | `onAuxClick` | Same fields, for the non-primary buttons |
+| Click | `onClick` | `x`, `y`, `button`, `clickCount`, `isRightClick`, `modifiers` — primary button only |
+| Aux click | `onAuxClick` | `x`, `y`, `clickCount`, `isRightClick`, `modifiers` — non-primary buttons |
 | Mouse down | `onMouseDown` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse up | `onMouseUp` | `x`, `y`, `button`, `clickCount`, `modifiers` |
 | Mouse enter | `onMouseEnter` | `hovered` |
@@ -2050,8 +2099,8 @@ is one event per pointer move.
 Capture arms on the **left** button only. A right-button drag is not captured,
 so it ends when the pointer leaves the element.
 
-`onClick` is the primary button too, like the DOM. Use **`onAuxClick`** for the
-others, and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
+`onClick` fires on primary-button mouse-up. Use **`onAuxClick`** for the others,
+and read `event.isRightClick`. `onMouseDown` and `onMouseUp` see every
 button through `event.button` (`0` left, `1` middle, `2` right).
 
 ## Supported Styles
@@ -2081,7 +2130,7 @@ CSS-like styling via the `style` prop:
 
 **Position:** `position` (`"relative"` | `"absolute"` | `"fixed"`), `top`, `right`, `bottom`, `left` — `"fixed"` lays out like `"absolute"`, because GPUI has no scrolling document to be fixed against
 
-**Visual:** `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
+**Visual:** `background`, `backgroundColor`, `color`, `opacity`, `cursor`, `pointerEvents`, `borderRadius`, `borderTopLeftRadius`, `borderTopRightRadius`, `borderBottomLeftRadius`, `borderBottomRightRadius`, `borderWidth`, `borderTopWidth`, `borderRightWidth`, `borderBottomWidth`, `borderLeftWidth`, `borderColor`, `boxShadow`
 
 ### Cursors
 
@@ -2116,6 +2165,32 @@ uses `csscolorparser` 0.8.3 and accepts:
 Standard comma and modern space/slash alpha forms work. Values are converted
 to hard-clipped sRGB before GPUI paints them. Invalid strings are ignored for
 that property; they do not reject the full style object.
+
+### Linear gradients
+
+`background` accepts GPUI's native **two-stop linear gradient**. Angles follow
+CSS: `0` points up and values increase clockwise. Stop positions use `0` to `1`.
+
+```tsx
+<div
+  style={{
+    background: {
+      type: 'linear-gradient',
+      angle: 90,
+      stops: [
+        { color: '#7c3aed', position: 0 },
+        { color: '#06b6d4', position: 1 },
+      ],
+      colorSpace: 'oklab',
+    },
+    borderRadius: 12,
+  }}
+/>
+```
+
+`colorSpace` is optional and defaults to `"srgb"`. GPUI also supports
+`"oklab"`. It does not support radial, conic, repeating, or gradients with
+more than two stops.
 
 `hsv()`, `hsva()`, and `hwba()` are parser extensions rather than CSS Color 4
 standard functions. `color()`, platform/dynamic colors, and numeric color
@@ -2214,6 +2289,7 @@ wrapping `<div>`.
 
 Mark elements with **`testId`**, then drive them like Playwright. The same
 client works in vitest, inside browser pages, and against a child process.
+Mouse actions use the normal GPUI input path in all three hosts.
 
 ```tsx
 <div testId="sidebar-collapse" onClick={onCollapse}>‹</div>
@@ -2392,13 +2468,22 @@ ignored; `console.log` cannot break a message.
 ```ts
 import { launch } from '@gpuix/react/automation'
 
-const app = await launch({ command: 'bun', args: ['examples/chat.tsx'] })
+const app = await launch({
+  command: 'bun',
+  args: ['examples/chat.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
 await app.getByTestId('composer').fill('hello')
 await app.getByTestId('composer').press('enter')
 await app.getByText('hello').waitFor()
 await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
+
+Every live-app check must set `GPUIX_BACKGROUND=1`, and the app entry must map
+that flag to `focus: false`. On macOS and Windows, automation uses the real
+window input and paint pipelines without making the window active, so taking
+the user's keyboard has no test benefit. Linux currently ignores `focus`.
 
 `fill()` and `press()` dispatch through the live GPUI window input pipeline, so
 native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
@@ -2543,7 +2628,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 ## Status
 
 - [x] React reconciler with mutation-based protocol
-- [x] napi-rs FFI bindings (createElement, appendChild, setStyle, etc.)
+- [x] Atomic `applyBatch()` mutation transport through napi-rs and wasm-bindgen
 - [x] RetainedTree (Rust-side element storage)
 - [x] Style mapping (CSS properties → GPUI style methods)
 - [x] Mouse events (click, mouseDown, mouseUp, mouseMove, mouseEnter, mouseLeave)

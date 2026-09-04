@@ -2,7 +2,13 @@
 
 **Read [README.md](./README.md) first** to understand what GPUIX is, the architecture, mutation API, event flow, supported elements/events/styles, and the test renderer.
 
-Not **remorses**? Do not open a pull request. Open an issue. See [External contributors](#external-contributors).
+Unless you are **remorses** or **monotykamary**, do not open a pull request. Open an issue. See [External contributors](#external-contributors).
+
+## README is the public API contract
+
+Document every user-facing feature, element, prop, event, renderer option,
+public method, and behavior change in `README.md` in the same change. A
+changeset does not replace API documentation.
 
 ## GPUIX is a thin layer on GPUI
 
@@ -634,15 +640,13 @@ The 10k chat mount was 850ms. profano said:
 React was not the problem. The batch **stringified every style and theme**, then
 stringified the queue, then Rust parsed each escaped string again.
 
-Queue **raw objects**. Opcode `setCustomPropValue` carries a raw JSON value.
-`setCustomProp` still means a JSON **string** (legacy). A raw `"top"` or
-`"true"` on `setCustomProp` is parsed as JSON and throws. That is why the
-composer Selects died after the first applyBatch change: `<anchored side="top">`
-never committed.
+Queue **raw objects**. `setStyle` and `setCustomProp` both carry raw JSON values.
+Never encode either value before the outer batch is stringified. Doing so adds
+a second parse and turns strings such as `"top"` into nested JSON.
 
 ```ts
 queue.push(['setStyle', id, styleObject])
-queue.push(['setCustomPropValue', id, 'side', 'top'])
+queue.push(['setCustomProp', id, 'side', 'top'])
 ```
 
 After a JS reconciler change, **build `@gpuix/react`**. `examples/` and
@@ -1162,7 +1166,7 @@ belong in README. This list is only the remaining engineering work.
 - [x] napi-rs FFI bindings and RetainedTree
 - [x] Style mapping, including native `hover` / `active`
 - [x] Mouse, keyboard, focus, scroll, and click-outside events
-- [x] `commitMutations()` stores the view entity and calls `cx.notify()`
+- [x] Atomic `applyBatch()` mutation transport
 - [x] GPU-backed test renderer
 - [x] Native `<input>` and `<textarea>`
 - [x] `<img>` (local raster/SVG) and `<svg>` (tintable monochrome icons)
@@ -1260,10 +1264,13 @@ can be inspected after a run.
 ### Integration Test
 
 ```bash
-cd examples && bun --hot chat.tsx
+cd examples && GPUIX_BACKGROUND=1 bun --hot chat.tsx
 ```
 
 Use tuistory for the long-running process. Do not use `tsx` or raw `tmux`.
+On macOS and Windows, the background flag keeps the real GPU window from taking
+the user's keyboard; live paint, clicks, screenshots, and automation still
+work. Linux currently ignores `focus`.
 
 ### Drive the live window
 
@@ -1288,9 +1295,8 @@ still behaves normally.
 render(<App />, { focus: process.env.GPUIX_BACKGROUND !== '1' })
 ```
 
-`fill()` and `press()` do **not** work against `launch()`. The live renderer has
-no `simulateKeystrokes`, so they throw `keystrokes are not live yet`. That is
-unrelated to focus. Use `createTestRoot()` for anything that types.
+`fill()` and `press()` use the live GPUI window input pipeline and do not need
+the desktop window to become active.
 
 ```ts
 import { launch } from '@gpuix/react/automation'
@@ -1324,7 +1330,7 @@ you record a sidebar open/close, not a screen recorder.
 
 ## External contributors
 
-This section is for anyone who is not [remorses](https://github.com/remorses) (Tommy).
+This section is for anyone other than [remorses](https://github.com/remorses) (Tommy) or **monotykamary**.
 
 **Do not open a pull request.** Open a GitHub issue. Describe the bug or the idea. Wait.
 

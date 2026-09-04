@@ -30,11 +30,13 @@ export {
 export type { MacCpuThrottle } from "./cpu-throttle.js"
 
 interface NativeTestRendererApi extends NativeRenderer {
-  applyBatch(json: string): number[]
   flush(): void
   drainEvents(): EventPayload[]
   simulateKeystrokes(keystrokes: string): void
   focusElement(elementId: number): void
+  focusNext(): void
+  focusPrevious(): void
+  setWindowKeyEvents(keyDown: boolean, keyUp: boolean, eventId: number): void
   simulateKeyDown(keystroke: string, isHeld?: boolean): void
   simulateKeyUp(keystroke: string): void
   simulateClick(x: number, y: number, button?: number, modifiers?: string): void
@@ -61,6 +63,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   clockSet(nowMs: number): number
   clockFastForward(deltaMs: number): number
   clockResume(): number
+  advanceTime(milliseconds: number): void
   getRootId(): number | null
   getWindowSize(): { width: number; height: number }
   getAllText(): string[]
@@ -91,13 +94,15 @@ interface NativeTestRendererConstructor {
   new (width?: number, height?: number): NativeTestRendererApi
 }
 
-/** Offscreen window size for a test root. Defaults to 1280x800 in native. */
-export interface TestWindowOptions {
+/** Offscreen window size for a test renderer. Defaults to 1280x800 in native. */
+export interface TestRendererOptions {
   width?: number
   height?: number
 }
 
-// The native test renderer is exported by macOS and Windows builds.
+export type TestWindowOptions = TestRendererOptions & RootOptions
+
+// The class is always exported. hasTestGpuixRenderer is the real GPU impl.
 //
 // Loaded through `createRequire`, never a bare `require`. This file ships as
 // ESM, and Node has no `require` there: in a workspace vitest inlines it and
@@ -109,8 +114,9 @@ let NativeTestRenderer: NativeTestRendererConstructor | null = null
 try {
   const native = createRequire(import.meta.url)("@gpuix/native") as {
     TestGpuixRenderer?: NativeTestRendererConstructor
+    hasTestGpuixRenderer?: () => boolean
   }
-  if (native.TestGpuixRenderer) {
+  if (native.hasTestGpuixRenderer?.() && native.TestGpuixRenderer) {
     NativeTestRenderer = native.TestGpuixRenderer
   }
 } catch {
@@ -137,69 +143,28 @@ export interface TestElement {
 // ── TestRenderer ─────────────────────────────────────────────────────
 
 export class TestRenderer implements NativeRenderer {
-  commitCount = 0
-
   /** Native TestGpuixRenderer — all state lives here in Rust's RetainedTree. */
   private native: NativeTestRendererApi
+  readonly applyBatch: NativeRenderer["applyBatch"]
+  readonly focusNext: () => void
+  readonly focusPrevious: () => void
+  readonly setWindowKeyEvents: (
+    keyDown: boolean,
+    keyUp: boolean,
+    eventId: number
+  ) => void
 
-  constructor(options: TestWindowOptions = {}) {
+  constructor(options: TestRendererOptions = {}) {
     if (!NativeTestRenderer) {
       throw new Error(
-        "Native TestGpuixRenderer not available. Build with test-support to run tests."
+        "TestGpuixRenderer is macOS and Windows only. Linux builds have no test-support because wgpu cannot read a rendered image back yet. GpuixRenderer still works on Linux."
       )
     }
     this.native = new NativeTestRenderer(options.width, options.height)
-  }
-
-  // ── NativeRenderer interface (all mutations delegate to native) ──
-
-  createElement(id: number, elementType: string): void {
-    this.native.createElement(id, elementType)
-  }
-
-  destroyElement(id: number): Array<number> {
-    return this.native.destroyElement(id)
-  }
-
-  appendChild(parentId: number, childId: number): void {
-    this.native.appendChild(parentId, childId)
-  }
-
-  removeChild(parentId: number, childId: number): void {
-    this.native.removeChild(parentId, childId)
-  }
-
-  insertBefore(parentId: number, childId: number, beforeId: number): void {
-    this.native.insertBefore(parentId, childId, beforeId)
-  }
-
-  setStyle(id: number, styleJson: string): void {
-    this.native.setStyle(id, styleJson)
-  }
-
-  setText(id: number, content: string): void {
-    this.native.setText(id, content)
-  }
-
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void {
-    this.native.setEventListener(id, eventType, hasHandler)
-  }
-
-  setRoot(id: number): void {
-    this.native.setRoot(id)
-  }
-
-  setCustomProp(id: number, key: string, valueJson: string): void {
-    this.native.setCustomProp(id, key, valueJson)
-  }
-
-  commitMutations(): void {
-    this.native.commitMutations()
-    this.commitCount++
-  }
-
-  applyBatch(json: string): Array<number> {
-    return this.native.applyBatch(json)
+    this.applyBatch = this.native.applyBatch.bind(this.native)
+    this.focusNext = this.native.focusNext.bind(this.native)
+    this.focusPrevious = this.native.focusPrevious.bind(this.native)
+    this.setWindowKeyEvents = this.native.setWindowKeyEvents.bind(this.native)
   }
 
   // ── GPUI pipeline methods ───────────────────────────────────────
@@ -485,6 +450,14 @@ export class TestRenderer implements NativeRenderer {
     return this.native.clockResume()
   }
 
+  /** Advance GPUI's test dispatcher and run due timers.
+   *  This is not `clockFastForward`. That moves the motion clock only.
+   *  Use this for caret blink, input drag autoscroll, and list edge scroll. */
+  advanceTime(milliseconds: number): void {
+    this.native.advanceTime(milliseconds)
+    this.dispatchNativeEvents()
+  }
+
   focusElement(elementId: number): void {
     this.native.flush()
     this.native.focusElement(elementId)
@@ -666,7 +639,7 @@ export interface TestRoot {
  * wide enough to keep a centered max-width column capped, so a layout test that
  * needs to observe re-wrapping must ask for a narrower window.
  */
-export function createTestRoot(options: TestWindowOptions & RootOptions = {}): TestRoot {
+export function createTestRoot(options: TestWindowOptions = {}): TestRoot {
   const renderer = new TestRenderer(options)
   const root = createRoot(renderer, options)
 

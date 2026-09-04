@@ -19,6 +19,7 @@ const SVG_FIXTURE = [
   '<rect x="112" y="74" width="70" height="12" rx="6" fill="#2a3c61"/>',
   "</svg>",
 ].join("")
+const SVG_DATA_URL = `data:image/svg+xml;base64,${Buffer.from(SVG_FIXTURE).toString("base64")}`
 
 function writeSvgFixture(filePath: string): void {
   fs.writeFileSync(filePath, SVG_FIXTURE, "utf8")
@@ -58,6 +59,33 @@ describeNative("custom element: img", () => {
   })
 
   describe("screenshots", () => {
+    it("renders base64 data URLs like filesystem images", () => {
+      function App({ src }: { src: string }) {
+        return <img src={src} style={{ width: 240, height: 140 }} />
+      }
+
+      const pathImage = `${SHOTS_DIR}/gpuix-img-path.png`
+      const dataImage = `${SHOTS_DIR}/gpuix-img-data-url.png`
+      if (fs.existsSync(pathImage)) fs.unlinkSync(pathImage)
+      if (fs.existsSync(dataImage)) fs.unlinkSync(dataImage)
+
+      testRoot.render(<App src={IMAGE_FIXTURE_PATH} />)
+      testRoot.renderer.flush()
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(pathImage)
+
+      testRoot.render(<App src={SVG_DATA_URL} />)
+      testRoot.renderer.flush()
+      testRoot.renderer.flush()
+      testRoot.renderer.captureScreenshot(dataImage)
+
+      if (!isCI) {
+        expect(
+          bufferSimilarity(fs.readFileSync(pathImage), fs.readFileSync(dataImage))
+        ).toBeGreaterThan(0.99)
+      }
+    })
+
     it("should capture screenshot changes after image source is set", () => {
       function ImageScreenshotProbe() {
         const [loaded, setLoaded] = useState(false)
