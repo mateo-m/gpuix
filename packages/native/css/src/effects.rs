@@ -1,10 +1,12 @@
 //! `filter`, `backdrop-filter` and `<blend-mode>`.
 //!
-//! A filter list folds into one blur and one colour matrix. Every filter
-//! function of Filter Effects 1 except `blur()`, `drop-shadow()` and `url()`
-//! is a 4 by 5 matrix on straight rgba, and matrices multiply, so a list
-//! costs one matrix on the GPU however long it is. Two blurs add in
-//! quadrature, since a Gaussian of a Gaussian is a Gaussian.
+//! A filter list folds into one blur, one colour matrix and at most one
+//! drop shadow. Every filter function of Filter Effects 1 except `blur()`,
+//! `drop-shadow()` and `url()` is a 4 by 5 matrix on straight rgba, and
+//! matrices multiply, so a list costs one matrix on the GPU however long it
+//! is. Two blurs add in quadrature, since a Gaussian of a Gaussian is a
+//! Gaussian. `url()` names an SVG filter, and there is no document to find
+//! one in, so it reads as unsupported.
 
 use lightningcss::properties::effects::{
     BlendMode as CssBlendMode, Filter as CssFilter, FilterList,
@@ -12,6 +14,7 @@ use lightningcss::properties::effects::{
 use lightningcss::traits::Parse;
 use lightningcss::values::percentage::NumberOrPercentage;
 
+use crate::color::{self, ColorContext, Rgba};
 use crate::CssError;
 
 /// A row-major 4 by 5 colour matrix. Rows are the output r, g, b and a.
@@ -33,10 +36,26 @@ pub struct Filter {
     pub blur: f32,
     /// Every other function, multiplied in list order.
     pub matrix: ColorMatrix,
+    /// The one `drop-shadow()` of the list, if it has one.
+    pub shadow: Option<DropShadow>,
+    /// Whether the shadow colour read `currentColor`.
+    pub read_current_color: bool,
+}
+
+/// A `drop-shadow()`: the alpha of the element, blurred, moved and coloured,
+/// under the element.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct DropShadow {
+    /// The x and y offset in CSS pixels.
+    pub offset: (f32, f32),
+    /// Standard deviation of the blur in CSS pixels. CSS writes a blur
+    /// radius, which is two of these.
+    pub blur: f32,
+    pub color: Rgba,
 }
 
 /// Read a `filter` or `backdrop-filter` value. `none` reads as `Ok(None)`.
-pub fn filter(value: &str) -> Result<Option<Filter>, CssError> {
+pub fn filter(value: &str, context: &ColorContext) -> Result<Option<Filter>, CssError> {
     let list = FilterList::parse_string(value).map_err(|_| CssError::BadValue {
         property: "filter".to_string(),
         value: value.to_string(),
@@ -47,6 +66,8 @@ pub fn filter(value: &str) -> Result<Option<Filter>, CssError> {
     };
     let mut blur = 0.0f32;
     let mut matrix = IDENTITY;
+    let mut shadow = None;
+    let mut read_current_color = false;
     for function in functions.iter() {
         match function {
             CssFilter::Blur(length) => {
@@ -82,11 +103,26 @@ pub fn filter(value: &str) -> Result<Option<Filter>, CssError> {
             CssFilter::Sepia(amount) => {
                 matrix = then(&matrix, &sepia(fraction(amount).clamp(0.0, 1.0)));
             }
-            CssFilter::DropShadow(_) => {
-                return Err(CssError::Unsupported {
-                    feature: "drop-shadow()".to_string(),
-                    value: value.to_string(),
-                })
+            CssFilter::DropShadow(drop) => {
+                if shadow.is_some() {
+                    return Err(CssError::Unsupported {
+                        feature: "more than one drop-shadow()".to_string(),
+                        value: value.to_string(),
+                    });
+                }
+                let px = |length: &lightningcss::values::length::Length| {
+                    length.to_px().ok_or_else(|| CssError::Unsupported {
+                        feature: "a drop-shadow() length in a unit that needs the font"
+                            .to_string(),
+                        value: value.to_string(),
+                    })
+                };
+                read_current_color |= color::reads_current_color(&drop.color);
+                shadow = Some(DropShadow {
+                    offset: (px(&drop.x_offset)?, px(&drop.y_offset)?),
+                    blur: px(&drop.blur)? / 2.0,
+                    color: color::resolve(&drop.color, context)?,
+                });
             }
             CssFilter::Url(_) => {
                 return Err(CssError::Unsupported {
@@ -96,7 +132,12 @@ pub fn filter(value: &str) -> Result<Option<Filter>, CssError> {
             }
         }
     }
-    Ok(Some(Filter { blur, matrix }))
+    Ok(Some(Filter {
+        blur,
+        matrix,
+        shadow,
+        read_current_color,
+    }))
 }
 
 /// How a layer mixes with what is under it. Compositing and Blending 1, in
@@ -277,28 +318,68 @@ mod tests {
         a.iter().zip(b).all(|(x, y)| (x - y).abs() < 1e-3)
     }
 
+    fn read(value: &str) -> Result<Option<Filter>, CssError> {
+        filter(value, &ColorContext::default())
+    }
+
     #[test]
     fn none_reads_as_no_filter() {
-        assert_eq!(filter("none").unwrap(), None);
+        assert_eq!(read("none").unwrap(), None);
+    }
+
+    #[test]
+    fn a_drop_shadow_reads_its_offset_blur_and_colour() {
+        let shadow = read("drop-shadow(2px 4px 6px red)")
+            .unwrap()
+            .unwrap()
+            .shadow
+            .unwrap();
+        assert_eq!(shadow.offset, (2.0, 4.0));
+        // The blur radius is two sigmas.
+        assert_eq!(shadow.blur, 3.0);
+        assert_eq!(shadow.color, Rgba { r: 1.0, g: 0.0, b: 0.0, a: 1.0 });
+    }
+
+    #[test]
+    fn a_drop_shadow_without_a_colour_reads_current_color() {
+        let context = ColorContext {
+            current_color: Rgba { r: 0.0, g: 0.0, b: 1.0, a: 0.5 },
+            dark: false,
+        };
+        let read = filter("drop-shadow(1px 1px)", &context).unwrap().unwrap();
+        assert!(read.read_current_color);
+        let shadow = read.shadow.unwrap();
+        assert_eq!(shadow.blur, 0.0);
+        assert_eq!(shadow.color, context.current_color);
+    }
+
+    #[test]
+    fn a_second_drop_shadow_is_unsupported() {
+        assert!(read("drop-shadow(1px 1px red) drop-shadow(2px 2px blue)").is_err());
+    }
+
+    #[test]
+    fn a_url_filter_is_unsupported() {
+        assert!(read("url(#glow)").is_err());
     }
 
     #[test]
     fn blurs_add_in_quadrature() {
-        let read = filter("blur(3px) blur(4px)").unwrap().unwrap();
+        let read = read("blur(3px) blur(4px)").unwrap().unwrap();
         assert!((read.blur - 5.0).abs() < 1e-5);
         assert_eq!(read.matrix, IDENTITY);
     }
 
     #[test]
     fn a_full_grayscale_drops_every_hue() {
-        let read = filter("grayscale(100%)").unwrap().unwrap();
+        let read = read("grayscale(100%)").unwrap().unwrap();
         let red = apply(&read.matrix, [1.0, 0.0, 0.0, 1.0]);
         assert!(close(red, [0.2126, 0.2126, 0.2126, 1.0]), "{red:?}");
     }
 
     #[test]
     fn invert_flips_the_channels() {
-        let read = filter("invert(1)").unwrap().unwrap();
+        let read = read("invert(1)").unwrap().unwrap();
         let white = apply(&read.matrix, [1.0, 1.0, 1.0, 1.0]);
         assert!(close(white, [0.0, 0.0, 0.0, 1.0]), "{white:?}");
     }
@@ -307,8 +388,8 @@ mod tests {
     fn functions_apply_in_list_order() {
         // Brightness first then invert: 0.5 * 1 = 0.5, then 1 - 0.5 = 0.5.
         // Invert first then brightness: 1 - 1 = 0, then 0.5 * 0 = 0.
-        let a = filter("brightness(0.5) invert(1)").unwrap().unwrap();
-        let b = filter("invert(1) brightness(0.5)").unwrap().unwrap();
+        let a = read("brightness(0.5) invert(1)").unwrap().unwrap();
+        let b = read("invert(1) brightness(0.5)").unwrap().unwrap();
         let white = [1.0, 1.0, 1.0, 1.0];
         assert!(close(apply(&a.matrix, white), [0.5, 0.5, 0.5, 1.0]));
         assert!(close(apply(&b.matrix, white), [0.0, 0.0, 0.0, 1.0]));
@@ -316,25 +397,21 @@ mod tests {
 
     #[test]
     fn opacity_scales_alpha_only() {
-        let read = filter("opacity(25%)").unwrap().unwrap();
+        let read = read("opacity(25%)").unwrap().unwrap();
         let c = apply(&read.matrix, [0.2, 0.4, 0.6, 1.0]);
         assert!(close(c, [0.2, 0.4, 0.6, 0.25]), "{c:?}");
     }
 
     #[test]
     fn a_half_turn_of_hue_keeps_the_luminance() {
-        let read = filter("hue-rotate(180deg)").unwrap().unwrap();
+        let read = read("hue-rotate(180deg)").unwrap().unwrap();
         let grey = apply(&read.matrix, [0.5, 0.5, 0.5, 1.0]);
         assert!(close(grey, [0.5, 0.5, 0.5, 1.0]), "{grey:?}");
     }
 
     #[test]
-    fn drop_shadow_is_not_supported() {
-        assert!(matches!(
-            filter("drop-shadow(2px 2px red)"),
-            Err(CssError::Unsupported { .. })
-        ));
-        assert!(matches!(filter("wobble(3)"), Err(CssError::BadValue { .. })));
+    fn an_unknown_function_is_a_bad_value() {
+        assert!(matches!(read("wobble(3)"), Err(CssError::BadValue { .. })));
     }
 
     #[test]
