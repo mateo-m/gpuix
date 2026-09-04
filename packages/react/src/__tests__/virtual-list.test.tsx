@@ -114,6 +114,45 @@ describe("<virtual-list>", () => {
     expect(painted).not.toContain("row-0")
   })
 
+  // The anchor survives a prepend because splice_focusable shifts it, but a
+  // reader anchored on a row that content is spliced UNDER (a loading row)
+  // needs the pixel-preserving form: a negative offset anchors the viewport
+  // top above the item and gpui resolves it against measured heights.
+  it("scrolls to an item with a pixel offset and reports the logical anchor", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        <Rows count={100} />
+      </virtual-list>
+    )
+    const list = renderer.findByType("virtual-list")[0]
+
+    // The third element is the list's viewport height (the style height).
+    renderer.scrollToItem(list.id, 50, 25)
+    expect(renderer.getListScrollTop(list.id)).toEqual([50, 25, 160])
+    expect(renderer.getPaintedText()).toContain("row-50")
+
+    // 100px above row 50: layout walks up over rows 49..47 (40px each) and
+    // lands 20px into row 47.
+    renderer.scrollToItem(list.id, 50, -100)
+    expect(renderer.getListScrollTop(list.id)).toEqual([47, 20, 160])
+    const painted = renderer.getPaintedText()
+    expect(painted).toContain("row-47")
+    expect(painted).toContain("row-50")
+
+    // Walking past the first row clamps at the very top.
+    renderer.scrollToItem(list.id, 1, -400)
+    expect(renderer.getListScrollTop(list.id)).toEqual([0, 0, 160])
+
+    // A plain div is not a virtual list and has no logical anchor.
+    const row = renderer.findByText("row-0")!
+    expect(renderer.getListScrollTop(row.id)).toBeNull()
+  })
+
   it("lazily builds custom elements inside rows", () => {
     const { render, renderer } = createTestRoot()
     render(

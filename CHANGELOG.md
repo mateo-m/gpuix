@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1
+
+1. **Fixed `@gpuix/react/testing` reporting no native renderer when installed from npm.** `hasNativeTestRenderer` was always `false`, so every suite that guards on it skipped silently:
+
+   ```
+   Test Files  1 skipped (1)
+        Tests  6 skipped (6)
+   ```
+
+   `testing.js` ships as ESM and loaded the addon with a bare `require("@gpuix/native")`. Node has no `require` in ESM. Inside this repository vitest inlines the workspace package and provides one, so the suite here always passed; installed from npm the package is externalized and run by Node, the call threw, and the `catch` reported native as missing. It now uses `createRequire(import.meta.url)`.
+
 ## 0.5.0
 
 1. **GPUIX apps now run in the browser.** The same React tree renders through GPUI's browser platform on WebGPU, with a WebGL2 fallback. `RetainedTree`, `GpuixView`, styles, and text painting are shared with desktop, so events, selects, comboboxes, inputs, motion, and GPUI scroll gestures all work through a Wasm-to-JavaScript callback bridge. napi-rs stays the desktop bridge; wasm-bindgen starts `gpui_web` in the page.

@@ -704,7 +704,10 @@ export interface TextareaProps extends InputProps {
 type VirtualListShared = {
   // See the note on `Props.key`.
   key?: React.Key | null
-  style?: Omit<StyleDesc, "selectors">
+  /** No `hover` or `active`: gpui's `List` has no interactive element identity,
+   *  so it cannot hold the pressed or hovered state those styles read. Put them
+   *  on a wrapping `<div>` instead. */
+  style?: Omit<StyleDesc, "selectors" | "hover" | "active">
   children?: React.ReactNode
   ref?: React.Ref<PublicInstance>
   alignment?: "top" | "bottom"
@@ -849,8 +852,10 @@ export interface NativeRenderer {
    *  behavior is "auto", "instant" or "smooth", like the web scrollTo
    *  option. "auto", the default, reads the scroll-behavior of the box. */
   scrollTo?(elementId: number, x: number, y: number, behavior?: string): void
-  /** Scroll a child into view by its index in the children list. */
-  scrollToItem?(elementId: number, index: number): void
+  /** Scroll a child into view by its index in the children list.
+   *  `offsetInItem` is in pixels; a negative value anchors the viewport top
+   *  above the item, resolved against measured row heights at layout time. */
+  scrollToItem?(elementId: number, index: number, offsetInItem?: number): void
   /** Scroll every ancestor scroll box so the element shows, like the web
    *  scrollIntoView. block places it on the y axis and inline on the x
    *  axis: "start", "center", "end" or "nearest". The defaults match the
@@ -867,6 +872,10 @@ export interface NativeRenderer {
   ): void
   /** Get the current scroll offset [x, y] or null if element is not scrollable. */
   getScrollOffset?(elementId: number): Array<number> | null
+  /** The logical scroll anchor of a `<virtual-list>`:
+   *  `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+   *  else. `itemIndex == item count` is gpui's at-end sentinel. */
+  getListScrollTop?(elementId: number): Array<number> | null
 
   // ── View transitions ───────────────────────────────────────────
   /** Clone every element that has a `viewTransitionName`, with its painted
@@ -893,6 +902,8 @@ export interface NativeRenderer {
   getWindowSize?(): { width: number; height: number }
   getWindowInsets?(): NativeWindowInsets
   setWindowTitle?(title: string): void
+  /** Bring the window forward and focus it. Reveals a `show: false` window. */
+  activateWindow?(): void
   setDebugFrameOverlay?(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay?(): string
   cycleDebugFrameOverlay?(): string

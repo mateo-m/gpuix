@@ -1,0 +1,21 @@
+<!-- Browser page for the bidirectional infinite history example. -->
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1" />
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./web.css" />
+    <title>GPUIX Infinite History</title>
+  </head>
+  <body>
+    <div id="gpuix-loader" role="status" aria-live="polite">
+      <div>
+        <i aria-hidden="true"></i>
+        <strong>Loading GPUIX Infinite History</strong>
+        <span>Starting the WebGPU renderer…</span>
+      </div>
+    </div>
+    <script type="module" src="./web-infinite-chat.tsx"></script>
+  </body>
+</html>
