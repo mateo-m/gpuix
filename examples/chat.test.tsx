@@ -1,5 +1,5 @@
 /**
- * Visual tests for the Waku-style chat example.
+ * Visual tests for the GPUIX chat example.
  *
  * Renders the real app through the GPU test renderer and captures screenshots
  * into `examples/screenshots/`, so the layout can be inspected after a run.
@@ -11,7 +11,7 @@ import { fileURLToPath } from 'url'
 import React from 'react'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { render, resetRender } from '@gpuix/react'
-import { connectTest } from '@gpuix/react/automation'
+import { connectTest, launch } from '@gpuix/react/automation'
 import { createTestRoot, hasNativeTestRenderer, TestRenderer } from '@gpuix/react/testing'
 import { ChatApp, SafeMdxContent, SafeMdxTranscript } from './chat'
 
@@ -23,6 +23,29 @@ beforeAll(() => {
 })
 
 describeNative('chat example', () => {
+  it(
+    'fills and submits the live composer',
+    async () => {
+      const app = await launch({
+        command: 'bun',
+        args: ['chat.tsx'],
+        cwd: path.dirname(fileURLToPath(import.meta.url)),
+        env: { GPUIX_BACKGROUND: '1' },
+      })
+
+      try {
+        const composer = app.getByTestId('composer')
+        await composer.waitFor({ timeoutMs: 30_000 })
+        await composer.fill('hello gpuix')
+        await composer.press('enter')
+        await app.getByText('hello gpuix').waitFor()
+      } finally {
+        await app.close()
+      }
+    },
+    30_000
+  )
+
   it('renders safe-mdx through GPUIX primitives', () => {
     const { render, renderer } = createTestRoot()
     render(<SafeMdxTranscript />)
@@ -155,9 +178,7 @@ describeNative('chat example', () => {
 
     expect(painted).toContain('DeepSeek V4 Flash')
     expect(painted).toContain('Local')
-    expect(painted.some((line) => line.includes('control plane for local coding agents'))).toBe(
-      true
-    )
+    expect(painted.some((line) => line.includes('React renderer for GPUI'))).toBe(true)
   })
 
   it('scrolls the transcript past the first turn', () => {
@@ -248,7 +269,7 @@ describeNative('chat example', () => {
     expect(renderer.getPaintedText()).toContain('New Task')
     expect(renderer.getPaintedText()).toContain('give me a quick overview')
     expect(
-      renderer.getPaintedText().some((line) => line.includes('control plane for local coding agents'))
+      renderer.getPaintedText().some((line) => line.includes('React renderer for GPUI'))
     ).toBe(true)
     expect(fs.statSync(after).size).toBeGreaterThan(0)
   }, 20_000)
