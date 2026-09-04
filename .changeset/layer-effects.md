@@ -8,8 +8,10 @@ Add `filter`, `backdrop-filter`, `mask-image`, `mix-blend-mode`, `background-ble
 An element with any of the first four paints itself and its children into a
 texture of its own, and the GPU paints that texture over the frame with the
 effect. `blur()` is a two-pass Gaussian on a shrunk texture, so a wide blur
-costs the same as a narrow one. The other filter functions fold into one
-colour matrix. `mask-image` takes a gradient and keeps each pixel by its
+costs the same as a narrow one. `drop-shadow()` blurs the alpha of the
+element's picture and paints it under the element in its colour. The other
+filter functions fold into one colour matrix. `url()` is the one function
+not painted. `mask-image` takes a gradient and keeps each pixel by its
 alpha. Over a `backdrop-filter: blur()` the alpha scales the blur radius
 instead, so an eased mask gives a progressive blur like the iOS 26
 navigation bar. CSS would fade a sharp copy over the blur there. All sixteen blend modes of Compositing and Blending 1 plus

@@ -3,7 +3,7 @@
 /// Each of these makes the element paint itself and its children into a
 /// texture of its own. The GPU then paints that texture over the frame with
 /// the effect, so the content under it is untouched. `filter` functions
-/// other than `blur()` fold into one colour matrix.
+/// other than `blur()` and `drop-shadow()` fold into one colour matrix.
 
 import React from "react"
 import { Grid, Panel, Sample } from "./ui.js"
@@ -17,6 +17,9 @@ const FILTERS: Array<[string, string]> = [
   ["saturate(3)", ""],
   ["brightness(0.5) contrast(2)", "two functions, in order"],
   ["opacity(0.4)", "same as opacity, as a filter"],
+  ["drop-shadow(0 8px 6px rgb(0 0 0 / 0.7))", "the alpha of the box, blurred and moved"],
+  ["drop-shadow(6px 6px #ff2fa0)", "a sharp shadow"],
+  ["blur(2px) drop-shadow(0 6px 4px #5cc8ff)", "the shadow follows the blurred box"],
 ]
 
 const BLENDS = [
@@ -34,7 +37,7 @@ function Picture() {
 
 function Filters() {
   return (
-    <Panel title="filter" note="Every function of Filter Effects 1 except drop-shadow() and url(). The blur bleeds past the box, like on the web.">
+    <Panel title="filter" note="Every function of Filter Effects 1 except url(), which names an SVG filter and has nothing to name here. The blur and the shadow bleed past the box, like on the web.">
       <Grid>
         {FILTERS.map(([value, hint]) => (
           <Sample key={value} label={value} hint={hint}>

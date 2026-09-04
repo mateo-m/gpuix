@@ -156,13 +156,19 @@ impl<'a> Scope<'a> {
         Some(reading.fill)
     }
 
-    /// The blur and colour matrix a `filter` or `backdrop-filter` names.
+    /// The blur, colour matrix and drop shadow a `filter` or
+    /// `backdrop-filter` names.
     ///
     /// `None` for `none`, and for a list this build cannot paint, such as
-    /// one with `drop-shadow()`.
+    /// one with `url()`.
     pub fn filter(&self, text: &str) -> Option<gpuix_css::effects::Filter> {
         let text = self.value(text)?;
-        gpuix_css::effects::filter(&text).ok()?
+        let context = ColorContext { current_color: self.current_color, dark: self.dark };
+        let filter = gpuix_css::effects::filter(&text, &context).ok()??;
+        if filter.read_current_color {
+            self.used.set(true);
+        }
+        Some(filter)
     }
 
     /// The blend mode a `mix-blend-mode` or `background-blend-mode` names.

@@ -621,6 +621,13 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
         el = el
             .blur(gpui::px(filter.blur))
             .color_matrix(gpui::ColorMatrix(filter.matrix));
+        if let Some(shadow) = filter.shadow {
+            el = el.drop_shadow(gpui::DropShadow {
+                offset: gpui::point(gpui::px(shadow.offset.0), gpui::px(shadow.offset.1)),
+                blur: gpui::px(shadow.blur),
+                color: crate::color::to_hsla(shadow.color),
+            });
+        }
     }
     if let Some(filter) = style
         .backdrop_filter
@@ -1052,12 +1059,22 @@ mod tests {
 
         // `none` and a filter this build cannot paint both set nothing.
         let style = StyleDesc {
-            filter: Some("drop-shadow(1px 1px red)".to_string()),
+            filter: Some("url(#glow)".to_string()),
             backdrop_filter: Some("none".to_string()),
             ..Default::default()
         };
         let base = Resolved::build(&style, &no_variables()).base;
         assert!(base.effects.is_none());
+
+        let style = StyleDesc {
+            filter: Some("drop-shadow(1px 2px 4px red)".to_string()),
+            ..Default::default()
+        };
+        let base = Resolved::build(&style, &no_variables()).base;
+        let shadow = base.effects.expect("effects").drop_shadow.expect("shadow");
+        assert_eq!(shadow.offset, gpui::point(gpui::px(1.0), gpui::px(2.0)));
+        assert_eq!(shadow.blur, gpui::px(2.0));
+        assert_eq!(shadow.color, gpui::red());
     }
 
     #[test]
