@@ -4,30 +4,18 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, height=device-height, initial-scale=1" />
-    <title>GPUIX Web</title>
-    <style>
-      * { box-sizing: border-box; }
-      html, body { margin: 0; width: 100%; height: 100%; overflow: hidden; background: #11111b; }
-      canvas { display: block; width: 100%; height: 100%; touch-action: none; }
-      /* The app draws every glyph itself, so the browser must not treat the page as
-         a document: a long press would otherwise select the whole body and pop the
-         iOS callout, and a tap would flash the tap highlight over the full-screen
-         canvas. GPUIX handles long press and selection in its own code. */
-      html, body, canvas {
-        -webkit-user-select: none;
-        user-select: none;
-        -webkit-touch-callout: none;
-        -webkit-tap-highlight-color: transparent;
-      }
-      /* GPUI's hidden IME textarea still needs a real selection for composition,
-         backspace context, and clipboard. */
-      [data-gpui-input] {
-        -webkit-user-select: text !important;
-        user-select: text !important;
-      }
-    </style>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./web.css" />
+    <title>GPUIX Chat</title>
   </head>
   <body>
+    <div id="gpuix-loader" role="status" aria-live="polite">
+      <div>
+        <i aria-hidden="true"></i>
+        <strong>Loading GPUIX Chat</strong>
+        <span>Starting the WebGPU renderer…</span>
+      </div>
+    </div>
     <script type="module" src="./web-chat.tsx"></script>
   </body>
 </html>

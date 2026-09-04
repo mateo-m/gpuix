@@ -351,7 +351,7 @@ impl CustomElement for TextEditorElement {
             .w_full()
             .track_focus(&focus_handle)
             .child(state);
-        editor = ctx.styled(editor);
+        editor = ctx.styled_interactive(editor);
         if ctx
             .style
             .and_then(|style| style.position.as_deref())

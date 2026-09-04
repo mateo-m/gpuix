@@ -23,6 +23,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # One target per OS, on the architecture that OS is mostly used on.
+        # Every extra target is a full gpui build, and gpui is most of the
+        # wall clock of this workflow. Add a target back when someone asks
+        # for it, not before: `packages/native/package.json` `napi.targets`
+        # must list exactly the same set, or the published loader looks for
+        # a platform package that CI never built.
         settings:
           # ── macOS (Metal) ──────────────────────────────────────────
           # default features include test-support (TestGpuixRenderer)
@@ -30,30 +36,18 @@ jobs:
             target: aarch64-apple-darwin
             bunTarget: bun-darwin-arm64
             build: bun run build --target aarch64-apple-darwin
-          - host: macos-latest
-            target: x86_64-apple-darwin
-            bunTarget: bun-darwin-x64
-            build: bun run build --target x86_64-apple-darwin
           # ── Linux (Vulkan/wgpu) ────────────────────────────────────
           # build:release disables test-support until wgpu image readback lands.
           - host: ubuntu-latest
             target: x86_64-unknown-linux-gnu
             bunTarget: bun-linux-x64
             build: bun run build:release --target x86_64-unknown-linux-gnu
-          - host: ubuntu-24.04-arm
-            target: aarch64-unknown-linux-gnu
-            bunTarget: bun-linux-arm64
-            build: bun run build:release --target aarch64-unknown-linux-gnu
           # ── Windows (Direct3D) ─────────────────────────────────────
           # Test support includes TestGpuixRenderer and render_to_image.
           - host: windows-latest
             target: x86_64-pc-windows-msvc
             bunTarget: bun-windows-x64
             build: bun run build --target x86_64-pc-windows-msvc
-          - host: windows-latest
-            target: aarch64-pc-windows-msvc
-            bunTarget: bun-windows-arm64
-            build: bun run build --target aarch64-pc-windows-msvc
     name: build - ${{ matrix.settings.target }}
     runs-on: ${{ matrix.settings.host }}
     defaults:
@@ -144,11 +138,30 @@ jobs:
           COMPILE_SKIP_APP: "1"
         run: bun compile.ts chat.tsx --name "GPUIX Chat" --id dev.gpuix.chat --icon assets/icons/openai-mark.svg --tint "#10a37f"
 
+      # A release asset is served as raw bytes, so a download loses the
+      # executable bit and arrives with no extension: macOS and Linux users
+      # got a file the OS refused to open. `.tar.gz` keeps the mode and names
+      # itself. Windows already ships a `.exe`, which needs no unpacking.
+      - name: Package chat example
+        working-directory: examples/dist/chat
+        shell: bash
+        env:
+          NAME: example-chat-${{ matrix.settings.target }}
+        run: |
+          if [ -f "$NAME.exe" ]; then
+            echo "$NAME.exe already carries an extension"
+            exit 0
+          fi
+          chmod +x "$NAME"
+          tar -czf "$NAME.tar.gz" "$NAME"
+          rm "$NAME"
+          ls -l
+
       - name: Upload example artifact
         uses: actions/upload-artifact@v4
         with:
           name: example-chat-${{ matrix.settings.target }}
-          path: examples/dist/chat/example-chat-${{ matrix.settings.target }}*
+          path: examples/dist/chat/example-chat-${{ matrix.settings.target }}.*
           if-no-files-found: error
 
   test:
@@ -193,6 +206,16 @@ jobs:
       - name: Typecheck the example app
         run: bun run typecheck
         working-directory: example-app
+
+      - name: Test CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run test
+        working-directory: cli
+
+      - name: Build CLI
+        run: bun run build
+        working-directory: cli
 
   test-windows:
     name: test-windows
@@ -239,6 +262,42 @@ jobs:
       - name: Run example tests
         run: bun run test
         working-directory: examples
+
+  publish-cli:
+    name: publish-cli
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Test CLI
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: bun run test
+        working-directory: cli
+
+      - name: Publish @gpuix/cli
+        env:
+          SIGILLO_TOKEN: ${{ secrets.SIGILLO_TOKEN }}
+          SIGILLO_PROJECT: ${{ vars.SIGILLO_PROJECT }}
+          SIGILLO_ENVIRONMENT: prod
+        run: |
+          CURRENT_VERSION=$(node -p "require('./cli/package.json').version")
+          if npm view "@gpuix/cli@${CURRENT_VERSION}" version 2>/dev/null; then
+            echo "@gpuix/cli@${CURRENT_VERSION} already published, skipping"
+          else
+            echo "Publishing @gpuix/cli@${CURRENT_VERSION}"
+            cd cli
+            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
+          fi
 
   publish:
     name: publish

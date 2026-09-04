@@ -6,6 +6,10 @@ import type { Container, EventHandlerMap, NativeRenderer } from "../types/host.j
 /// native renderer keeps the event callback from the first evaluation.
 /// That old callback must find the container the new evaluation attached,
 /// so both evaluations have to share one map.
+///
+/// The map is also the ownership guard: a renderer owns one window, one native
+/// root id, and one event handler map, so a second root would replace all three
+/// without the first root ever knowing.
 const CONTAINERS_KEY = "__gpuixEventContainers"
 
 function containersByRenderer(): WeakMap<NativeRenderer, Container> {
@@ -21,11 +25,23 @@ function containersByRenderer(): WeakMap<NativeRenderer, Container> {
 }
 
 export function attachRoot(renderer: NativeRenderer, container: Container): void {
-  containersByRenderer().set(renderer, container)
+  const containers = containersByRenderer()
+  const owner = containers.get(renderer)
+  if (owner && owner !== container) {
+    throw new Error(
+      "This renderer already drives a mounted GPUIX root. One renderer owns one window, one native root id, and one event map, so a second root would silently take both over. Unmount the first root first."
+    )
+  }
+  containers.set(renderer, container)
 }
 
-export function detachRoot(renderer: NativeRenderer): void {
-  containersByRenderer().delete(renderer)
+/** Only the owner may detach. Otherwise unmounting a rejected or stale root
+ *  would delete the live root's event mapping and every handler would go dead. */
+export function detachRoot(renderer: NativeRenderer, container: Container): void {
+  const containers = containersByRenderer()
+  if (containers.get(renderer) === container) {
+    containers.delete(renderer)
+  }
 }
 
 export function containerForRenderer(renderer: NativeRenderer): Container | undefined {
