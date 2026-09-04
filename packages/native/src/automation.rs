@@ -13,8 +13,8 @@ use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use gpui::{
-    canvas, point, px, App, Bounds, InputEvent, IntoElement, Modifiers, MouseButton,
-    MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window,
+    canvas, point, px, App, Bounds, InputEvent, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
+    Modifiers, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Styled, Window,
 };
 use web_time::Instant;
 
@@ -41,7 +41,12 @@ thread_local! {
     static BOUNDS: RefCell<HashMap<u64, ElementBounds>> = RefCell::new(HashMap::new());
 }
 
-/// Zero-size canvas. Paint it with the selection reset, before any content.
+/// Zero-size canvas. Keep it ahead of the app subtree under the root.
+///
+/// Everything here is recorded during **paint**, never prepaint: gpui's
+/// `List::prepaint` speculatively prepaints a row range and can roll the window
+/// back and prepaint a different one, so a prepaint-recorded box can belong to a
+/// row that never reached the screen.
 pub fn bounds_frame_reset() -> impl IntoElement {
     canvas(
         |_, _, _| (),
@@ -52,6 +57,16 @@ pub fn bounds_frame_reset() -> impl IntoElement {
     .absolute()
     .w(px(0.0))
     .h(px(0.0))
+}
+
+/// Record this element's own painted box, with no extra element in the tree.
+///
+/// `bounds_tracker` needs a positioned parent and one canvas child, which a leaf
+/// such as `gpui::img` cannot have. Wrapping the leaf in a div instead would
+/// move the layout box: the wrapper would become the flex item and the image
+/// would lose intrinsic sizing and corner clipping.
+pub fn track_own_bounds<E: gpui::InteractiveElement>(el: E, id: u64) -> E {
+    el.on_painted(move |bounds, _, _| record_bounds(id, bounds))
 }
 
 pub fn record_bounds(id: u64, bounds: Bounds<Pixels>) {
@@ -220,6 +235,50 @@ pub fn parse_modifiers(modifiers: Option<&str>) -> Modifiers {
         }
     }
     parsed
+}
+
+pub fn dispatch_keystrokes(
+    window: &mut Window,
+    cx: &mut App,
+    keystrokes: &str,
+) -> Result<(), String> {
+    for keystroke in keystrokes.split(' ') {
+        window.dispatch_keystroke(parse_keystroke(keystroke)?, cx);
+    }
+    Ok(())
+}
+
+pub fn dispatch_key_down(
+    window: &mut Window,
+    cx: &mut App,
+    keystroke: &str,
+    is_held: bool,
+) -> Result<(), String> {
+    window.dispatch_event(
+        KeyDownEvent {
+            keystroke: parse_keystroke(keystroke)?,
+            is_held,
+            prefer_character_input: false,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    Ok(())
+}
+
+pub fn dispatch_key_up(window: &mut Window, cx: &mut App, keystroke: &str) -> Result<(), String> {
+    window.dispatch_event(
+        KeyUpEvent {
+            keystroke: parse_keystroke(keystroke)?,
+        }
+        .to_platform_input(),
+        cx,
+    );
+    Ok(())
+}
+
+fn parse_keystroke(keystroke: &str) -> Result<Keystroke, String> {
+    Keystroke::parse(keystroke).map_err(|error| format!("Invalid keystroke '{keystroke}': {error}"))
 }
 
 /// Every automation mouse dispatcher takes modifiers, so a test can drive

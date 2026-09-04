@@ -118,4 +118,88 @@ describeNative("mutation lifecycle", () => {
       second.unmount()
     }
   })
+
+  // React calls `detachDeletedInstance` only for host components, never for a
+  // host text node, so a removed string used to stay in the retained tree with
+  // no parent and no way back to it.
+  it("frees a removed text node instead of leaking it", () => {
+    const { render, renderer, unmount } = createTestRoot()
+
+    try {
+      render(<div style={{ width: 100, height: 100 }}>{"hello"}</div>)
+      const withText = renderer.getRetainedElementCount()
+
+      render(<div style={{ width: 100, height: 100 }}>{null}</div>)
+      expect(renderer.getAllText()).toEqual([])
+      expect(renderer.getRetainedElementCount()).toBe(withText - 1)
+
+      // A whole removed subtree frees every node in it, not just its root.
+      render(
+        <div style={{ width: 100, height: 100 }}>
+          <div>
+            <text>deep</text>
+          </div>
+        </div>
+      )
+      const withSubtree = renderer.getRetainedElementCount()
+      expect(withSubtree).toBe(withText + 2)
+
+      render(<div style={{ width: 100, height: 100 }}>{null}</div>)
+      expect(renderer.getRetainedElementCount()).toBe(withText - 1)
+    } finally {
+      unmount()
+    }
+  })
+
+  it("refuses a second simultaneous root on one renderer", () => {
+    const renderer = new TestRenderer()
+    const first = createRoot(renderer)
+    const onFirst = vi.fn()
+
+    try {
+      flushSync(() =>
+        first.render(
+          <div style={{ width: 100, height: 100 }} onClick={onFirst}>
+            first
+          </div>
+        )
+      )
+      renderer.flush()
+
+      expect(() => createRoot(renderer)).toThrowErrorMatchingInlineSnapshot(
+        `[Error: This renderer already drives a mounted GPUIX root. One renderer owns one window, one native root id, and one event map, so a second root would silently take both over. Unmount the first root first.]`
+      )
+
+      // The rejected root must not have disturbed the live one.
+      handleGpuixEvent({ elementId: renderer.getRoot()!.id, eventType: "click" }, renderer)
+      expect(onFirst).toHaveBeenCalledTimes(1)
+    } finally {
+      first.unmount()
+    }
+  })
+
+  it("allows a new root once the previous one unmounts", () => {
+    const renderer = new TestRenderer()
+    const first = createRoot(renderer)
+    flushSync(() => first.render(<text>first</text>))
+    renderer.flush()
+    first.unmount()
+
+    const second = createRoot(renderer)
+    const onSecond = vi.fn()
+    try {
+      flushSync(() =>
+        second.render(
+          <div style={{ width: 100, height: 100 }} onClick={onSecond}>
+            second
+          </div>
+        )
+      )
+      renderer.flush()
+      handleGpuixEvent({ elementId: renderer.getRoot()!.id, eventType: "click" }, renderer)
+      expect(onSecond).toHaveBeenCalledTimes(1)
+    } finally {
+      second.unmount()
+    }
+  })
 })

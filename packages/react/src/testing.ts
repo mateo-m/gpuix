@@ -9,6 +9,8 @@
 /// flush the tree, dispatch through GPUI, drain events, and feed them into
 /// the React event registry via handleGpuixEvent.
 
+import { createRequire } from "node:module"
+
 import type { ReactNode } from "react"
 import type { EventPayload } from "@gpuix/native"
 import type {
@@ -62,6 +64,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   simulateMouseUp(x: number, y: number, button: number, modifiers?: string): void
   getTreeJson(): string
   getAutomationTree(): string
+  getRetainedElementCount(): number
   getElementBounds(elementId: number): number[] | null
   clockPause(): number
   clockSet(nowMs: number): number
@@ -71,7 +74,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getWindowSize(): { width: number; height: number }
   getAllText(): string[]
   scrollTo(elementId: number, x: number, y: number, behavior?: string): void
-  scrollToItem(elementId: number, index: number): void
+  scrollToItem(elementId: number, index: number, offsetInItem?: number): void
   scrollIntoView(
     elementId: number,
     block?: string,
@@ -82,6 +85,7 @@ interface NativeTestRendererApi extends NativeRenderer {
   getScrollOffset(elementId: number): number[] | null
   viewTransitionCapture(): void
   viewTransitionStart(options?: string): void
+  getListScrollTop(elementId: number): number[] | null
   setDebugFrameOverlay(mode: DebugFrameOverlayMode): string
   getDebugFrameOverlay(): string
   cycleDebugFrameOverlay(): string
@@ -111,10 +115,16 @@ export interface TestWindowOptions {
 }
 
 // The native test renderer is exported by macOS and Windows builds.
+//
+// Loaded through `createRequire`, never a bare `require`. This file ships as
+// ESM, and Node has no `require` there: in a workspace vitest inlines it and
+// happens to provide one, but a real dependency is externalized and run by
+// Node, where the bare call threw `require is not defined`. The `catch` then
+// made `hasNativeTestRenderer` false, so every suite that guards on it
+// silently skipped for anyone consuming the published package.
 let NativeTestRenderer: NativeTestRendererConstructor | null = null
 try {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const native = require("@gpuix/native") as {
+  const native = createRequire(import.meta.url)("@gpuix/native") as {
     TestGpuixRenderer?: NativeTestRendererConstructor
   }
   if (native.TestGpuixRenderer) {
@@ -515,6 +525,12 @@ export class TestRenderer implements NativeRenderer {
     return this.native.getAutomationTree()
   }
 
+  /** Every element the native tree holds, reachable or not. `toJSON()` walks
+   *  from the root, so only this can see a node that was detached and leaked. */
+  getRetainedElementCount(): number {
+    return this.native.getRetainedElementCount()
+  }
+
   getElementBounds(elementId: number): number[] | null {
     return this.native.getElementBounds(elementId)
   }
@@ -558,10 +574,14 @@ export class TestRenderer implements NativeRenderer {
     this.native.flush()
   }
 
-  /** Scroll a child into view by its index in the children list. */
-  scrollToItem(elementId: number, index: number): void {
+  /** Scroll a child into view by its index in the children list.
+   *
+   *  `offsetInItem` is in pixels. A negative value anchors the viewport top
+   *  above the item, resolved against measured row heights at layout time, so
+   *  a row stays pixel-stable while unmeasured rows are spliced in above it. */
+  scrollToItem(elementId: number, index: number, offsetInItem?: number): void {
     this.native.flush()
-    this.native.scrollToItem(elementId, index)
+    this.native.scrollToItem(elementId, index, offsetInItem)
     this.dispatchNativeEvents()
     this.native.flush()
   }
@@ -591,6 +611,18 @@ export class TestRenderer implements NativeRenderer {
     const result = this.native.getScrollOffset(elementId)
     if (!result) return null
     return [result[0], result[1]]
+  }
+
+  /** The logical scroll anchor of a `<virtual-list>`:
+   *  `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+   *  else. `itemIndex == item count` is gpui's at-end sentinel. Exact even
+   *  while row heights are still estimates, because it is the anchor gpui
+   *  itself scrolls by. */
+  getListScrollTop(elementId: number): [number, number, number] | null {
+    this.native.flush()
+    const result = this.native.getListScrollTop(elementId)
+    if (!result) return null
+    return [result[0], result[1], result[2]]
   }
 
   // ── View transitions ────────────────────────────────────────────
