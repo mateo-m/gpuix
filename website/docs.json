@@ -20,25 +20,33 @@
     ]
   },
   "navigation": {
-    "global": {
-      "anchors": [
-        {
-          "anchor": "GitHub",
-          "href": "https://github.com/remorses/gpuix",
-          "icon": "lucide:github"
-        },
-        {
-          "anchor": "npm",
-          "href": "https://www.npmjs.com/package/@gpuix/react",
-          "icon": "lucide:package"
-        }
-      ]
-    },
-    "groups": [
+    "tabs": [
       {
-        "group": "Overview",
-        "icon": "lucide:home",
-        "pages": ["index"]
+        "tab": "Docs",
+        "icon": "lucide:book-open",
+        "groups": [
+          {
+            "group": "Overview",
+            "icon": "lucide:home",
+            "pages": ["index"]
+          }
+        ]
+      },
+      {
+        "tab": "Changelog",
+        "icon": "lucide:newspaper",
+        "changelog": "https://github.com/remorses/gpuix",
+        "initialContent": "changelog/intro"
+      },
+      {
+        "tab": "GitHub",
+        "icon": "lucide:github",
+        "href": "https://github.com/remorses/gpuix"
+      },
+      {
+        "tab": "npm",
+        "icon": "lucide:package",
+        "href": "https://www.npmjs.com/package/@gpuix/react"
       }
     ]
   },
