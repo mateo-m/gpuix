@@ -201,6 +201,31 @@ describe("style props reach the renderer", () => {
     )
   })
 
+  it("applies a two-stop linear gradient", () => {
+    const gradient = (angle: number) => (
+      <div style={{ display: "flex", padding: 40, backgroundColor: "#101010", height: "100%" }}>
+        <div
+          style={{
+            width: 360,
+            height: 220,
+            borderRadius: 24,
+            background: {
+              type: "linear-gradient",
+              angle,
+              stops: [
+                { color: "#7c3aed", position: 0 },
+                { color: "#06b6d4", position: 1 },
+              ],
+              colorSpace: "oklab",
+            },
+          }}
+        />
+      </div>
+    )
+
+    comparePixels("linear-gradient", gradient(0), gradient(90))
+  })
+
   it("applies rowGap and columnGap", () => {
     // Both were in StyleDesc and implemented nowhere; only `gap` worked.
     const boxes = [0, 1, 2, 3].map((i) => (

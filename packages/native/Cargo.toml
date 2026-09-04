@@ -1,6 +1,6 @@
 [package]
 name = "gpuix-native"
-version = "0.5.1"
+version = "0.7.0"
 edition = "2021"
 description = "GPUI bindings for Node.js via napi-rs"
 license = "Apache-2.0"
@@ -17,6 +17,8 @@ gpuix-css = { path = "css" }
 serde = { version = "1", features = ["derive"] }
 serde_json = { version = "1", features = ["raw_value"] }
 anyhow = "1"
+base64 = "0.22"
+csscolorparser = "0.8.3"
 log = "0.4"
 env_logger = "0.11"
 parking_lot = "0.12"
@@ -72,6 +74,11 @@ core-text = "=21.0.0"
 core-graphics = "=0.24.0"
 # Production uses the embedded AppKit loop; tests use the native Metal renderer.
 gpui_macos = { path = "../../zed/crates/gpui_macos", default-features = false, features = ["font-kit"] }
+
+# Same crate GPUI uses. A .node cannot ship an exe manifest, so Windows DPI
+# awareness is set at runtime in renderer.rs instead of via windows-manifest.
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.61", features = ["Win32_Foundation", "Win32_UI_HiDpi"] }
 
 [features]
 # test-support is default so published binaries include TestGpuixRenderer,

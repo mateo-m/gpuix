@@ -445,9 +445,9 @@ fn render_code_block(language: Option<&str>, code: &str, ctx: &mut MdContext) ->
         let text: AnyElement = crate::text::selectable_text(crate::text::SelectableText {
             selectable: ctx.selectable,
             highlight: ctx
-            .highlight_set
-            .clone()
-            .map(crate::text::HighlightSource::Native),
+                .highlight_set
+                .clone()
+                .map(crate::text::HighlightSource::Native),
             ..crate::text::SelectableText::new(
                 ctx.element_id,
                 sub,

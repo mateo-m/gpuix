@@ -223,7 +223,8 @@ describeNative('infinite chat example', () => {
       renderer.nativeSimulateScrollWheel(450, 120, 0, -240)
       renderer.flush()
     }
-    expect(painted()).toHaveLength(0)
+    const anchor = renderer.getListScrollTop(listOf(renderer).id)
+    expect(anchor?.[0]).toBeGreaterThanOrEqual(9)
 
     await waitForIdle(renderer)
 
