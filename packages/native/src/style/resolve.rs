@@ -417,6 +417,27 @@ fn overscroll(
     }
 }
 
+/// Base styles plus gpui's `hover` and `active` refinements.
+///
+/// Every stateful GPUI root must go through this, never `apply_styles` alone.
+/// `StyleDesc` carries `hover` and `active` for every element type, so a custom
+/// element that only applied the base styles accepted the prop, serialized it,
+/// and dropped it. gpui reads both refinements from the element state behind the
+/// element's `ElementId`, so the caller must have called `.id(..)` first.
+pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc, scope: &Scope) -> E
+where
+    E: gpui::Styled + gpui::StatefulInteractiveElement,
+{
+    el = apply_styles(el, style, scope);
+    if let Some(hover_style) = style.hover.as_deref() {
+        el = el.hover(|refinement| apply_styles(refinement, hover_style, scope));
+    }
+    if let Some(active_style) = style.active.as_deref() {
+        el = el.active(|refinement| apply_styles(refinement, active_style, scope));
+    }
+    el
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope: &Scope) -> E {
     // `visibility` reached StyleDesc but nothing read it, so `hideInstance`
     // hid nothing. GPUI's Visibility::Hidden has the CSS meaning: skip the
@@ -750,14 +771,14 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
         el = el.cursor(cursor);
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
-    // overflow: "scroll" and "auto" need StatefulInteractiveElement, so build_div() handles them.
+    // overflow: "scroll" and "auto" need StatefulInteractiveElement, so build_host_container() handles them.
     // CSS precedence: axis-specific (overflowX/Y) overrides the shorthand (overflow).
     {
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
         let (resolved_x, resolved_y) =
             crate::renderer::scrollbar::used_overflow(resolved_x, resolved_y);
-        // Only apply hidden here — scroll is handled in build_div.
+        // Only apply hidden here — scroll is handled in build_host_container.
         // `clip` clips like `hidden`. The difference in CSS, that `clip`
         // is not a scroll container for `scrollTo`, has no meaning here.
         let hidden = |word: Option<&str>| matches!(word, Some("hidden") | Some("clip"));

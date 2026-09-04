@@ -4,7 +4,7 @@ React bindings for [GPUI](https://github.com/zed-industries/zed/tree/main/crates
 
 Build native GPU-accelerated desktop apps with React and TypeScript. Your components render directly to the GPU via Metal, DirectX, or Vulkan. No Electron, no web views.
 
-![A Waku-style app built with GPUIX](./docs/images/chat-app.png)
+![The GPUIX chat example running natively](./docs/images/chat-app.png)
 
 Everything above is GPUIX: the sidebar, the scrolling list, the composer,
 and native `<markdown>`. Start it with **`bun --hot`** so a save remounts React
@@ -16,8 +16,22 @@ cd examples && bun --hot chat.tsx
 
 ## Quickstart
 
-Install two packages. `@gpuix/react` pulls the native renderer for your
-platform, so there is nothing to build and no Rust toolchain to install.
+Create an app from the official example. The command downloads only
+`example-app/` and installs its dependencies. There is no repository clone,
+native build, or Rust toolchain.
+
+```bash
+bunx @gpuix/cli new my-app
+cd my-app
+bun run dev
+```
+
+`@gpuix/react` pulls the native renderer for your platform. Edit `app.tsx` and
+the running window remounts on save.
+
+### Build from scratch
+
+Install the packages directly when you do not want the example app:
 
 ```bash
 bun add @gpuix/react react
@@ -103,18 +117,26 @@ The binary carries the renderer, so it runs with no Bun and no Node install.
 ### Start from the example app
 
 [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) is a complete todo app in one file, with `dev`,
-`build`, `web:dev` and `typecheck` scripts already wired. Copy the folder,
-change `@gpuix/react` from `workspace:^` to a version range, and run
-`bun install`.
+`build`, `web:dev` and `typecheck` scripts already wired. Create a copy with
+`bunx @gpuix/cli new my-app`.
 
 ![The GPUIX todo example app](./docs/images/todo-app.png)
+
+### Shell completions
+
+Install completions for the `gpuix` command:
+
+```bash
+bun add -g @gpuix/cli
+gpuix completions install
+```
 
 ## Examples
 
 | Example | Run | What it shows |
 |---|---|---|
 | **todo** | `bun run dev` in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) | The starting point: one file, a `<virtual-list>`, a native `<input>`, and an animated sidebar |
-| **chat** | `bun --hot chat.tsx` | A Waku-style app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
+| **chat** | `bun --hot chat.tsx` | A GPUIX app: transparent titlebar, animated sidebar, message list, composer, `<markdown>` |
 | **timeline** | `bun --hot timeline.tsx` | A video-editor timeline: clip dragging, edge trimming with snapping, playhead scrubbing, marquee selection, zoom under the pointer, and a two-axis pan with a frozen ruler and track column |
 | **native-text** | `bun --hot native-text.tsx` | The three native text components with a tab switcher |
 | **counter** | `bun --hot counter.tsx` | The smallest possible app: state, events, hover |
@@ -124,14 +146,16 @@ change `@gpuix/react` from `workspace:^` to a version range, and run
 The todo app lives in [`example-app/`](https://github.com/remorses/gpuix/tree/main/example-app) and is meant to be copied.
 The rest live in [`examples/`](https://github.com/remorses/gpuix/tree/main/examples). All of them use hardcoded data.
 
-Or download a standalone **chat** build from the [GitHub release](https://github.com/remorses/gpuix/releases). Files are named `example-chat-<target>`. No Bun or Rust install is required.
+Or download a standalone **chat** build from the [GitHub release](https://github.com/remorses/gpuix/releases). No Bun or Rust install is required.
 
 ```bash
-chmod +x example-chat-aarch64-apple-darwin
+tar -xzf example-chat-aarch64-apple-darwin.tar.gz
 ./example-chat-aarch64-apple-darwin
 ```
 
-macOS may block the unsigned binary the first time. Right-click the file, choose **Open**, and confirm. Windows: download `example-chat-x86_64-pc-windows-msvc.exe` and double-click it.
+The archive keeps the executable bit, so there is no `chmod` step. macOS may still block the unsigned binary the first time. Right-click the file, choose **Open**, and confirm.
+
+On Windows, download `example-chat-x86_64-pc-windows-msvc.exe` and double-click it. On Linux, the file is `example-chat-x86_64-unknown-linux-gnu.tar.gz`.
 
 The web example bundles the same React app and reconciler as the desktop chat
 example. wasm-bindgen exposes the mutation interface to the existing retained
@@ -310,6 +334,7 @@ Event handlers are stored in a JS-side registry keyed by `(elementId, eventType)
 
 - **`@gpuix/native`** — Rust bindings to GPUI. It publishes napi-rs desktop binaries and a wasm-bindgen browser build, both backed by `GpuixRenderer`, `RetainedTree`, `build_element()`, and `apply_styles()`.
 - **`@gpuix/react`** — React reconciler, event registry, and TypeScript types. Implements the `react-reconciler` host config using the mutation API.
+- **`@gpuix/cli`** — `gpuix new` downloads `example-app/`, sets its published React dependency, and installs it as a standalone project.
 
 ## Building
 
@@ -385,9 +410,12 @@ terminal.
 |---|---|---|
 | `titlebarTransparent` | boolean | Hide the native titlebar so the app draws chrome under the traffic lights |
 | `windowBackground` | `"opaque"` (default), `"transparent"`, `"blurred"` | Window fill. `"blurred"` is the macOS vibrancy backdrop |
-| `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. Waku uses `(16, 17)` |
+| `trafficLightX` / `trafficLightY` | pixels | Traffic-light origin. The chat example uses `(16, 17)` |
 | `transparent` | boolean | Same as `windowBackground: "transparent"` when that option is unset |
 | `appName` | string | Name inside the macOS `Hide X` and `Quit X` items. Defaults to `title` |
+| `focus` | boolean, default `true` | `false` opens the window behind the active app, like `open -g` |
+| `show` | boolean, default `true` | `false` opens the window hidden. Call `activateWindow()` to reveal it |
+
 Call it again after a save and it remounts the tree on the same window.
 
 ### The macOS menu bar
@@ -423,6 +451,122 @@ later calls only remount React.
 `createRenderer()`, `createRoot()`, and `startFrameLoop()` stay public for
 tests and custom hosts. Pass `{ renderer }` into `render()` when you already
 have one.
+
+**One renderer drives one root.** A renderer owns one window, one native root
+id, and one event map, so `createRoot()` throws if that renderer already has a
+mounted root. Call `unmount()` on the first root before you create another;
+`render()` already does that for you.
+
+### Background launch
+
+`focus: false` opens the window **without taking focus**. The app you were
+typing in keeps the caret and the active titlebar. `show: false` goes further
+and opens no window at all, so the process runs with a live React tree and
+nothing on screen.
+
+```tsx
+render(<App />, { title: 'Notes', focus: false })
+```
+
+**Turn this on whenever a coding agent runs your app.** An agent that starts
+the app to check its work will otherwise yank the window in front of whatever
+you are doing, mid-sentence, once per iteration. With `focus: false` the agent
+still gets a real GPU-rendered window it can screenshot and click, and you keep
+your editor. See [Let an agent drive the app](#let-an-agent-drive-the-app).
+
+`activateWindow()` brings the window forward and focuses it. It is the only way
+to reveal a `show: false` window. Reach it from any component with
+`useGpuixRequired()`:
+
+```tsx
+import { useGpuixRequired } from '@gpuix/react'
+
+function Reveal() {
+  const renderer = useGpuixRequired()
+  return <div onClick={() => renderer.activateWindow?.()}>Show</div>
+}
+```
+
+Outside React, call it on the renderer that `createRenderer()` returned.
+
+| Platform | `focus: false` | `show: false` |
+|---|---|---|
+| macOS | window orders in front without becoming key, like `open -g` | honored |
+| Windows | `SW_SHOWNOACTIVATE` | honored |
+| Linux | **ignored**, the window opens focused | **ignored** |
+
+The process still gets a **Dock icon** on macOS. GPUI sets the regular
+activation policy, so there is no menu-bar-agent mode yet. For a real
+background daemon, run the app from a `launchd` agent in
+`~/Library/LaunchAgents/`; launchd never activates the process.
+
+### Let an agent drive the app
+
+Make focus opt-in through the environment, so a human run behaves normally and
+an agent run stays out of the way:
+
+```tsx
+render(<App />, {
+  title: 'Notes',
+  focus: process.env.GPUIX_BACKGROUND !== '1',
+})
+```
+
+```bash
+bun app.tsx                      # you: window comes to the front
+GPUIX_BACKGROUND=1 bun app.tsx   # agent: window opens behind your editor
+```
+
+`launch()` passes `env` straight through, so an agent script sets it once and
+every screenshot, click, and assertion runs on a window that never interrupts
+you:
+
+```ts
+import { launch } from '@gpuix/react/automation'
+
+const app = await launch({
+  command: 'bun',
+  args: ['app.tsx'],
+  env: { GPUIX_BACKGROUND: '1' },
+})
+
+await app.getByTestId('bump').waitFor()
+await app.getByTestId('bump').click()
+await app.screenshot({ path: 'tmp/after-click.png' })
+await app.close()
+```
+
+Focus is the only thing that changes. **Automation does not need focus.**
+`click()` hits the last painted bounds and `screenshot()` reads the GPU
+surface, so both work while the window sits behind your editor, and even on a
+`show: false` window that is not on screen at all.
+
+```
+  agent ──►  launch({ env: { GPUIX_BACKGROUND: '1' } })
+                │
+                ▼
+          GPU window renders and paints, but never activates
+                │
+                ├──►  getByTestId(..).click()   ✓  hits the last painted bounds
+                ├──►  screenshot({ path })      ✓  reads the GPU surface
+                ├──►  fill() / press()          ✗  keystrokes are not live yet
+                └──►  close()
+
+  you   ──►  keep typing, your editor stays frontmost the whole time
+```
+
+Two limits to know before you rely on it:
+
+- **Keyboard input does not reach a launched process.** `fill()` and `press()`
+  throw `keystrokes are not live yet`, because the live renderer implements no
+  `simulateKeystrokes`. This is not about focus; it fails on a focused window
+  too. Use `createTestRoot()` when a check needs typing
+- **Linux ignores `focus`**, so an agent there still gets a focused window
+
+Prefer `createTestRoot()` when you can. It opens **no window at all**, so
+nothing can steal focus and keyboard input works. Reach for `launch()` plus
+`focus: false` when the check needs a real window, real GPU paint, or a real
+process.
 
 ### flushSync
 
@@ -548,7 +692,8 @@ dedicated Rust UI thread. Node sends in-process commands to that thread, so
 `startFrameLoop` returns a no-op handle and does not create a JavaScript timer.
 All platforms use GPUI's native platform, window, renderer, input, scroll,
 clipboard, keyboard, and IME implementations. The embedded macOS run-loop
-extension comes from the pinned GPUIX fork. Windows runtime validation is pending.
+extension comes from the pinned GPUIX fork. CI runs the full React and example
+test suites through DirectX on Windows.
 
 > [!IMPORTANT]
 > On macOS, never drive `tick()` from a `setImmediate` loop. That spins at tens of thousands of
@@ -976,6 +1121,32 @@ function Results({ rows }: { rows: Result[] }) {
 ```
 
 `scrollTo`, `scrollToItem`, and `getScrollOffset` all support virtual lists.
+
+On a virtual list, `scrollToItem` takes an optional **pixel offset** and the
+list reports its logical anchor:
+
+```tsx
+renderer.scrollToItem(listId, index, offsetInItem)  // offset in px, may be negative
+renderer.getListScrollTop(listId)  // [itemIndex, offsetInItemPx, viewportHeightPx] or null
+```
+
+A **negative offset anchors the viewport top above the row**, and the next
+layout resolves it against real measured heights. That is the tool for
+infinite-scroll history: while the reader waits in a loading row, read
+`getListScrollTop`, commit the fetched page, then re-anchor on the message
+that was under the loading row with a negative offset. The message stays at
+the same pixel while the new rows are measured above it —
+`examples/infinite-chat.tsx` is the worked example.
+
+An `itemIndex` equal to the item count is gpui's **at-end sentinel**: a
+bottom-aligned list resting at its very end. A reader waiting at a trailing
+loading row usually sits there, and the viewport height in the same tuple is
+what converts that into a position relative to the trailing rows
+(`EDGE_HEIGHT - viewportHeight` in the example).
+
+Virtual-list `scrollToItem` calls are applied on the **next render, after
+that frame's child splice**, so an index computed against a just-committed
+child list is never shifted twice.
 
 ### Performance model
 
@@ -2021,6 +2192,12 @@ JavaScript round trip.
 Nesting is one level deep. A `hover` object cannot contain another `hover` or
 `active`.
 
+They work on **every** element, including `<text>`, `<code>`, `<markdown>`,
+`<diff>`, `<img>`, `<svg>` and the editors. The one exception is
+`<virtual-list>`, whose `style` type rejects them: gpui's list has no
+interactive identity to hold a hovered or pressed state, so put them on a
+wrapping `<div>`.
+
 > **Note: `white-space: pre` is not supported.** GPUI's text system only has `normal` (wraps) and `nowrap` (single line). To preserve newlines like HTML `<pre>`, split your text on `\n` in React and render each line as a separate `<text>` element in a flex column:
 >
 > ```tsx
@@ -2179,11 +2356,14 @@ await app.getByTestId('canvas').wheel(0, 120, { modifiers: 'cmd' })
 await app.getByTestId('clip-8').click({ modifiers: 'shift' })
 ```
 
-`click()` needs painted bounds, and a custom element only has them if its
-builder records them. `<div>`, `<text>`, `<input>`, `<textarea>` and `<code>`
-do. **`<img>`, `<svg>`, `<anchored>`, `<diff>` and `<markdown>` do not**, so
-`click()` on those throws `Element has no painted bounds`. `getByText` still
-finds text painted inside them, because text registers separately.
+`click()` needs painted bounds. **Every element that accepts `testId` records
+them**, including `<img>`, `<svg>` and `<anchored>`. An `<anchored>` reports the
+box of the overlay itself, not of the trigger it is anchored to, so `click()`
+lands on the menu even when it is deferred and snapped back inside the window.
+
+`<virtual-list>` is the exception, and it takes no `testId`. gpui's list is not
+an interactive element, so it has nothing to record a box against. Put the
+locator on a wrapping `<div>`.
 
 ### Screenshots and clock
 
@@ -2214,9 +2394,15 @@ import { launch } from '@gpuix/react/automation'
 
 const app = await launch({ command: 'bun', args: ['examples/chat.tsx'] })
 await app.getByTestId('composer').fill('hello')
+await app.getByTestId('composer').press('enter')
+await app.getByText('hello').waitFor()
 await app.screenshot({ path: 'live.png' })
 await app.close()
 ```
+
+`fill()` and `press()` dispatch through the live GPUI window input pipeline, so
+native `<input>` and `<textarea>` elements receive GPUI's keyboard and IME
+handling instead of a test-only input path.
 
 ## Testing
 
@@ -2381,6 +2567,7 @@ The test renderer uses `VisualTestAppContext` with a `TestDispatcher` for determ
 - [x] Window chrome (`titlebarTransparent`, `windowBackground`, traffic-light position)
 - [x] macOS menu bar with the standard shortcuts (`appName`)
 - [ ] App-declared menus and menu callbacks
+- [x] Background launch (`focus`, `show`, `activateWindow`)
 - [x] Last window close quits the process
 - [x] Debug frame overlay (`debugFrameOverlay` / `setDebugFrameOverlay`)
 - [ ] Canvas element
