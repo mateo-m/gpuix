@@ -5,3 +5,4 @@ dist
 .wrangler
 .dev.vars
 public/_holocron
+public/chat-example
