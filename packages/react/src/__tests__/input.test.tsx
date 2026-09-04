@@ -182,6 +182,97 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.readClipboardText()).toBe("typed")
   })
 
+  it("undoes a contiguous typing run as one edit", () => {
+    function TextInput() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 100 }}>
+          <input
+            value={text}
+            style={{ width: 300, height: 40 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${text}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<TextInput />)
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "a b c cmd-z")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: ")
+    expect(testRoot.renderer.getAllText()).not.toContain("Value: ab")
+  })
+
+  it("does not coalesce typing after 700ms", () => {
+    function TextInput() {
+      const [text, setText] = useState("")
+      return (
+        <div style={{ width: 400, height: 100 }}>
+          <input
+            value={text}
+            style={{ width: 300, height: 40 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${text}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<TextInput />)
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "a")
+    testRoot.renderer.advanceTime(800)
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "b cmd-z")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: a")
+  })
+
+  it("undoes contiguous backward deletion as one edit", () => {
+    function TextInput() {
+      const [text, setText] = useState("abcd")
+      return (
+        <div style={{ width: 400, height: 100 }}>
+          <input
+            value={text}
+            style={{ width: 300, height: 40 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${text}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<TextInput />)
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "backspace backspace cmd-z")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: abcd")
+  })
+
+  it("undoes contiguous forward deletion as one edit", () => {
+    function TextInput() {
+      const [text, setText] = useState("abcd")
+      return (
+        <div style={{ width: 400, height: 100 }}>
+          <input
+            value={text}
+            style={{ width: 300, height: 40 }}
+            onChange={(event: EventPayload) => setText(event.value ?? "")}
+          />
+          <text>{`Value: ${text}`}</text>
+        </div>
+      )
+    }
+
+    testRoot.render(<TextInput />)
+    const input = testRoot.renderer.findByType("input")[0]
+    testRoot.renderer.nativeSimulateKeystrokes(input.id, "cmd-left delete delete cmd-z")
+
+    expect(testRoot.renderer.getAllText()).toContain("Value: abcd")
+  })
+
   // Native binds word motion to alt on macOS and to ctrl everywhere else, the
   // same split every platform's own text fields use, so the test has to ask
   // for the chord this host actually binds.
@@ -299,7 +390,9 @@ describeNative("native text editors", () => {
     expect(testRoot.renderer.getAllText()).toContain("Value: a")
   })
 
-  it("keeps click and keyboard events available", () => {
+  it("keeps primary click and keyboard events available", () => {
+    let click: EventPayload | undefined
+
     function TextInput() {
       const [clicks, setClicks] = useState(0)
       const [keys, setKeys] = useState(0)
@@ -308,7 +401,10 @@ describeNative("native text editors", () => {
           <input
             value=""
             style={{ width: 300, height: 40 }}
-            onClick={() => setClicks((count) => count + 1)}
+            onClick={(event) => {
+              click = event
+              setClicks((count) => count + 1)
+            }}
             onKeyDown={() => setKeys((count) => count + 1)}
           />
           <text>{`Events: ${clicks}/${keys}`}</text>
@@ -318,9 +414,15 @@ describeNative("native text editors", () => {
 
     testRoot.render(<TextInput />)
     const input = testRoot.renderer.findByType("input")[0]
-    testRoot.renderer.nativeSimulateClick(150, 20)
+    testRoot.renderer.nativeSimulateMouseDown(150, 20, 0)
+    testRoot.renderer.nativeSimulateMouseUp(150, 20, 0)
     testRoot.renderer.nativeSimulateKeyDown(input.id, "a")
 
+    expect(testRoot.renderer.getAllText()).toContain("Events: 1/1")
+    expect(click).toMatchObject({ button: 0, isRightClick: false })
+
+    testRoot.renderer.nativeSimulateMouseDown(150, 20, 2)
+    testRoot.renderer.nativeSimulateMouseUp(150, 20, 2)
     expect(testRoot.renderer.getAllText()).toContain("Events: 1/1")
   })
 })

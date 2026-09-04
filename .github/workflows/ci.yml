@@ -249,7 +249,7 @@ jobs:
 
       - name: Verify Windows test renderer
         shell: bash
-        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.createElement(1, 'text'); renderer.setText(1, 'Windows test renderer'); renderer.setRoot(1); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
+        run: bun -e "const { statSync } = require('node:fs'); const { TestGpuixRenderer } = require('./packages/native'); const renderer = new TestGpuixRenderer(320, 200); renderer.applyBatch(JSON.stringify([['createElement',1,'text'],['setText',1,'Windows test renderer'],['setRoot',1]])); renderer.flush(); renderer.captureScreenshot('windows-test-renderer.png'); if (renderer.getAllText()[0] !== 'Windows test renderer' || statSync('windows-test-renderer.png').size === 0) throw new Error('TestGpuixRenderer did not render')"
 
       - name: Run React tests
         run: bun run test
@@ -296,7 +296,7 @@ jobs:
           else
             echo "Publishing @gpuix/cli@${CURRENT_VERSION}"
             cd cli
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
+            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > "$HOME/.npmrc" && bun publish --access public'
           fi
 
   publish:
@@ -367,7 +367,7 @@ jobs:
           else
             echo "Publishing @gpuix/native@${CURRENT_VERSION}"
             cd packages/native
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
+            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > "$HOME/.npmrc" && bun publish --access public'
           fi
 
       - name: Build @gpuix/react
@@ -393,7 +393,7 @@ jobs:
               pkg.dependencies['@gpuix/native'] = '^' + native
               fs.writeFileSync('package.json', JSON.stringify(pkg, null, 2) + '\n')
             "
-            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > /tmp/gpuix-npmrc && NPM_CONFIG_USERCONFIG=/tmp/gpuix-npmrc npm publish --access public --provenance'
+            bunx sigillo run --command 'printf "//registry.npmjs.org/:_authToken=%s\n" "$NPM_TOKEN" > "$HOME/.npmrc" && bun publish --access public'
           fi
 
       - name: Download example artifacts

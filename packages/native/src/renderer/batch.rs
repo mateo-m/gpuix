@@ -25,10 +25,6 @@ enum BatchOp<'a> {
         parent_id: u64,
         child_id: u64,
     },
-    RemoveChild {
-        parent_id: u64,
-        child_id: u64,
-    },
     InsertBefore {
         parent_id: u64,
         child_id: u64,
@@ -166,47 +162,6 @@ impl<'de> serde::Deserialize<'de> for StrArg<'de> {
     }
 }
 
-/// A legacy `setCustomProp` payload: a JSON string gets decoded, anything else
-/// is taken as-is. `setCustomPropValue` skips this and stores the raw value.
-struct LegacyPropArg(serde_json::Value);
-
-impl<'de> serde::Deserialize<'de> for LegacyPropArg {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        let value = serde_json::Value::deserialize(deserializer)?;
-        if let serde_json::Value::String(encoded) = &value {
-            return Ok(LegacyPropArg(
-                serde_json::from_str(encoded).unwrap_or_else(|_| value.clone()),
-            ));
-        }
-        Ok(LegacyPropArg(value))
-    }
-}
-
-/// `hasHandler` arrives as a bool from the reconciler and as a non-negative
-/// integer from hand-written batches. That is exactly what `as_bool()` then
-/// `as_u64()` accepted before, so a negative or fractional number stays an
-/// error rather than quietly meaning `true`.
-struct BoolArg(bool);
-
-impl<'de> serde::Deserialize<'de> for BoolArg {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> std::result::Result<Self, D::Error> {
-        struct V;
-        impl<'de> serde::de::Visitor<'de> for V {
-            type Value = BoolArg;
-            fn expecting(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-                f.write_str("a boolean or a non-negative integer")
-            }
-            fn visit_bool<E: serde::de::Error>(self, v: bool) -> std::result::Result<BoolArg, E> {
-                Ok(BoolArg(v))
-            }
-            fn visit_u64<E: serde::de::Error>(self, v: u64) -> std::result::Result<BoolArg, E> {
-                Ok(BoolArg(v != 0))
-            }
-        }
-        deserializer.deserialize_any(V)
-    }
-}
-
 fn next_arg<'de, A, T>(seq: &mut A, what: &str) -> std::result::Result<T, A::Error>
 where
     A: serde::de::SeqAccess<'de>,
@@ -256,10 +211,6 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                         parent_id: next_id(&mut seq, "parent id")?,
                         child_id: next_id(&mut seq, "child id")?,
                     },
-                    "removeChild" => BatchOp::RemoveChild {
-                        parent_id: next_id(&mut seq, "parent id")?,
-                        child_id: next_id(&mut seq, "child id")?,
-                    },
                     "insertBefore" => BatchOp::InsertBefore {
                         parent_id: next_id(&mut seq, "parent id")?,
                         child_id: next_id(&mut seq, "child id")?,
@@ -276,17 +227,12 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
                     "setEventListener" => BatchOp::SetEventListener {
                         id: next_id(&mut seq, "id")?,
                         event_type: next_arg::<A, StrArg>(&mut seq, "event type")?.0.into_owned(),
-                        has_handler: next_arg::<A, BoolArg>(&mut seq, "hasHandler")?.0,
+                        has_handler: next_arg(&mut seq, "hasHandler")?,
                     },
                     "setRoot" => BatchOp::SetRoot {
                         id: next_id(&mut seq, "id")?,
                     },
                     "setCustomProp" => BatchOp::SetCustomProp {
-                        id: next_id(&mut seq, "id")?,
-                        key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
-                        value: next_arg::<A, LegacyPropArg>(&mut seq, "custom prop value")?.0,
-                    },
-                    "setCustomPropValue" => BatchOp::SetCustomProp {
                         id: next_id(&mut seq, "id")?,
                         key: next_arg::<A, StrArg>(&mut seq, "prop key")?.0.into_owned(),
                         value: next_arg(&mut seq, "custom prop value")?,
@@ -310,24 +256,14 @@ impl<'de> serde::Deserialize<'de> for BatchOp<'de> {
 
 /// Turn one raw `setStyle` payload into a shared style.
 ///
-/// The reconciler always sends an object. A legacy batch can send the same
-/// object as a JSON *string*, so that is unwrapped to the bytes the interner
-/// should see. Anything else, `null` included, is handed to `StyleDesc` and
-/// rejected there. Doing this here, rather than in the deserializer, keeps the
-/// raw bytes available for the content hash.
+/// The reconciler sends an object. Anything else, `null` included, is handed
+/// to `StyleDesc` and rejected there. Interning the raw bytes here keeps them
+/// available for the content hash.
 fn intern_style_payload(
     styles: &mut StyleTable,
     payload: &serde_json::value::RawValue,
 ) -> BatchResult<Arc<StyleDesc>> {
-    // A `RawValue` always holds exactly one complete JSON value, so this is
-    // never empty and never a fragment.
-    let raw = payload.get().trim();
-    if raw.starts_with('"') {
-        let encoded: String = serde_json::from_str(raw).map_err(|error| error.to_string())?;
-        styles.intern(encoded.as_bytes())
-    } else {
-        styles.intern(raw.as_bytes())
-    }
+    styles.intern(payload.get().trim().as_bytes())
 }
 
 /// Resolve every `setStyle` payload in the batch, in op order.
@@ -389,12 +325,6 @@ pub fn apply_batch_to_tree(tree: &mut RetainedTree, bytes: &[u8]) -> BatchResult
                 child_id,
             } => {
                 tree.append_child(parent_id, child_id);
-            }
-            BatchOp::RemoveChild {
-                parent_id,
-                child_id,
-            } => {
-                tree.remove_child(parent_id, child_id);
             }
             BatchOp::InsertBefore {
                 parent_id,

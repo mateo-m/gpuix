@@ -564,5 +564,7 @@ if (isEntryPoint) {
     windowBackground: 'blurred',
     trafficLightX: 16,
     trafficLightY: 17,
+    // Agent checks need real GPU paint, not control of the user's keyboard.
+    focus: typeof process === 'undefined' || process.env.GPUIX_BACKGROUND !== '1',
   })
 }

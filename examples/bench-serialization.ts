@@ -33,9 +33,7 @@ type Op = unknown[]
 
 // ── Capture ──────────────────────────────────────────────────────────
 //
-// The reconciler only needs `applyBatch` to exist for the batching Proxy to
-// take the fast path. Every mutation method below is unreachable in that mode,
-// but NativeRenderer requires them, so they stay as no-ops.
+// The renderer contract is one atomic batch per React commit.
 
 class CaptureRenderer implements NativeRenderer {
   ops: Op[] = []
@@ -44,20 +42,6 @@ class CaptureRenderer implements NativeRenderer {
     for (const op of JSON.parse(json) as Op[]) this.ops.push(op)
     return []
   }
-
-  createElement(): void {}
-  destroyElement(): number[] {
-    return []
-  }
-  appendChild(): void {}
-  removeChild(): void {}
-  insertBefore(): void {}
-  setStyle(): void {}
-  setText(): void {}
-  setEventListener(): void {}
-  setRoot(): void {}
-  setCustomProp(): void {}
-  commitMutations(): void {}
   getWindowSize(): { width: number; height: number } {
     return { width: 1280, height: 800 }
   }

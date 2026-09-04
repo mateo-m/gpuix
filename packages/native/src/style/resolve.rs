@@ -19,7 +19,7 @@ use gpui::{Refineable, StyleRefinement};
 
 use crate::inheritance::Inherited;
 use crate::style::vars::Scope;
-use crate::style::StyleDesc;
+use crate::style::{BackgroundValue, StyleDesc};
 
 /// How many times `resolve` ran since the last reset.
 ///
@@ -358,19 +358,21 @@ fn dimension(value: crate::style::DimensionValue) -> gpui::Length {
 /// browser would paint the image over the colour, which only differs when
 /// the image has transparent parts. `background` is the shorthand, so it
 /// loses to both longhands.
-fn background_fill(style: &StyleDesc, scope: &Scope) -> Option<gpuix_css::background::Fill> {
+pub(crate) fn background_fill(style: &StyleDesc, scope: &Scope) -> Option<gpui::Background> {
     let image = style
         .background_image
         .as_deref()
         .and_then(|text| scope.fill(text));
-    if image.is_some() {
-        return image;
+    if let Some(fill) = image {
+        return Some(crate::color::to_background(&fill));
     }
-    style
-        .background_color
-        .as_deref()
-        .or(style.background.as_deref())
-        .and_then(|text| scope.fill(text))
+    if let Some(text) = style.background_color.as_deref() {
+        return scope.fill(text).map(|fill| crate::color::to_background(&fill));
+    }
+    match style.background.as_ref()? {
+        BackgroundValue::Text(text) => scope.fill(text).map(|fill| crate::color::to_background(&fill)),
+        BackgroundValue::Gradient(gradient) => scope.gradient(gradient),
+    }
 }
 
 /// Base styles plus gpui's `hover` and `active` refinements.
@@ -550,8 +552,8 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
     if let Some(left) = scope.number(&style.left) {
         el = el.left(gpui::px(left as f32));
     }
-    if let Some(fill) = background_fill(style, scope) {
-        el = el.bg(crate::color::to_background(&fill));
+    if let Some(background) = background_fill(style, scope) {
+        el = el.bg(background);
     }
     if let Some(color) = style.color.as_deref().and_then(|c| scope.color(c)) {
         el = el.text_color(crate::color::to_hsla(color));
@@ -883,11 +885,43 @@ mod tests {
 
         // The shorthand takes a gradient too.
         let shorthand = StyleDesc {
-            background: Some("linear-gradient(red, blue)".to_string()),
+            background: Some(BackgroundValue::Text("linear-gradient(red, blue)".to_string())),
             ..Default::default()
         };
         let fill = background_of(&shorthand, &no_variables()).expect("a fill");
         assert!(fill.color().and_then(|b| b.as_solid()).is_none());
+    }
+
+    #[test]
+    fn the_object_form_of_a_gradient_paints_in_its_colour_space() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"var(--from)","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
+        )
+        .unwrap();
+        let scope = variables(&[("--from", "#ff0000")]);
+        let fill = background_of(&style, &scope).expect("a fill");
+        let background = fill.color().expect("a background");
+        let stop = |hex: &str, position: f32| gpui::LinearColorStop {
+            color: crate::color::to_hsla(crate::color::from_gpui(
+                crate::color::parse_color_rgba(hex).unwrap(),
+            )),
+            percentage: position,
+            hint: 0.0,
+        };
+        let stops = [stop("#ff0000", 0.0), stop("#0000ff", 1.0)];
+        let in_oklab = gpui::linear_gradient_stops(gpui::GradientLine::Angle(90.0), &stops)
+            .color_space(gpui::ColorSpace::Oklab);
+        assert_eq!(background, in_oklab);
+        assert_ne!(
+            background,
+            gpui::linear_gradient_stops(gpui::GradientLine::Angle(90.0), &stops)
+        );
+
+        let out_of_range: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"red","position":0},{"color":"blue","position":2}]}}"##,
+        )
+        .unwrap();
+        assert!(background_of(&out_of_range, &no_variables()).is_none());
     }
 
     #[test]

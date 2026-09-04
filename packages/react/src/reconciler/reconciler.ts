@@ -6,13 +6,17 @@ import { ConcurrentRoot } from "react-reconciler/constants.js"
 import { GpuixContext } from "../hooks/use-gpuix.js"
 import type {
   Container,
-  ElementIdAllocator,
   NativeRenderer,
   RootOptions,
 } from "../types/host.js"
 import { wrapWithBatching } from "./batch-renderer.js"
 import { createClassNameCache } from "./class-names.js"
-import { attachRoot, detachRoot } from "./event-registry.js"
+import {
+  attachRoot,
+  detachRoot,
+  idAllocatorFor,
+  nextWindowKeyEventId,
+} from "./event-registry.js"
 import { hostConfig } from "./host-config.js"
 
 // Cast to any because @types/react-reconciler is out of date with react-reconciler 0.31.0
@@ -58,31 +62,34 @@ export interface Root {
   renderer: NativeRenderer
 }
 
-const idAllocators = new WeakMap<NativeRenderer, ElementIdAllocator>()
-
-function idAllocatorFor(renderer: NativeRenderer): ElementIdAllocator {
-  let alloc = idAllocators.get(renderer)
-  if (!alloc) {
-    alloc = { nextElementId: 0 }
-    idAllocators.set(renderer, alloc)
-  }
-  return alloc
-}
-
 export function createRoot(renderer: NativeRenderer, options: RootOptions = {}): Root {
   let container: OpaqueRoot | null = null
   const batchedRenderer = wrapWithBatching(renderer)
+  const ids = idAllocatorFor(renderer)
+  const windowKeyEventId = nextWindowKeyEventId(renderer)
   const gpuixContainer: Container = {
     renderer: batchedRenderer,
-    ids: idAllocatorFor(renderer),
+    ids,
     eventHandlers: new Map(),
     classNames: options.resolveClassName
       ? createClassNameCache(options.resolveClassName)
       : null,
     warnedAboutClassName: false,
+    windowKeyEventHandlers: options,
+    windowKeyEventId,
+    onEvent: options.onEvent,
   }
   attachRoot(renderer, gpuixContainer)
-  attachRoot(batchedRenderer, gpuixContainer)
+  try {
+    renderer.setWindowKeyEvents?.(
+      Boolean(options.onKeyDown),
+      Boolean(options.onKeyUp),
+      windowKeyEventId
+    )
+  } catch (error) {
+    detachRoot(renderer, gpuixContainer)
+    throw error
+  }
 
   const cleanup = (): void => {
     if (container) {
@@ -92,8 +99,9 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
       })
       container = null
     }
-    detachRoot(renderer, gpuixContainer)
-    detachRoot(batchedRenderer, gpuixContainer)
+    if (detachRoot(renderer, gpuixContainer)) {
+      renderer.setWindowKeyEvents?.(false, false, windowKeyEventId)
+    }
   }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -119,7 +127,7 @@ export function createRoot(renderer: NativeRenderer, options: RootOptions = {}):
       reconciler.updateContainer(
         React.createElement(
           GpuixContext.Provider,
-          { value: { renderer: batchedRenderer } },
+          { value: { renderer } },
           node
         ),
         activeContainer,
