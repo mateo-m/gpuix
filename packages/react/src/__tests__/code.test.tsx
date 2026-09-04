@@ -41,6 +41,18 @@ describe("<code>", () => {
     expect(renderer.getPaintedText()).toEqual(["a", "b", "c"])
   })
 
+  it("normalizes CRLF source lines", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <div style={{ display: "flex", flexDirection: "column", padding: 20 }}>
+        <code code={"// one\r\n// two\r\n"} language="ts" />
+      </div>
+    )
+
+    expect(renderer.getPaintedText()).toEqual(["// one", "// two", ""])
+    expect(renderer.dragSelect(22, 25, 900, 500)).toBe("// one\n// two")
+  })
+
   it("paints no surface of its own", () => {
     const { render, renderer } = createTestRoot()
     render(<code code={"a\nb\nc"} language="ts" />)
