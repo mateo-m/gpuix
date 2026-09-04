@@ -19,7 +19,7 @@ use gpui::{Refineable, StyleRefinement};
 
 use crate::inheritance::Inherited;
 use crate::style::vars::Scope;
-use crate::style::StyleDesc;
+use crate::style::{BackgroundValue, StyleDesc};
 
 /// How many times `resolve` ran since the last reset.
 ///
@@ -359,25 +359,27 @@ fn dimension(value: crate::style::DimensionValue) -> gpui::Length {
 /// it is the image, and a declared longhand wins over it either way. A
 /// longhand that reads as nothing, like `backgroundImage: "none"` or a value
 /// this build cannot paint, still wins, so the shorthand does not show
-/// through it.
-fn background_fills(
+/// through it. The object form of a gradient is always an image.
+pub(crate) fn background_fills(
     style: &StyleDesc,
     scope: &Scope,
-) -> (
-    Option<gpuix_css::background::Fill>,
-    Option<gpuix_css::background::Fill>,
-) {
+) -> (Option<gpui::Background>, Option<gpui::Background>) {
+    use crate::color::to_background;
     use gpuix_css::background::Fill;
-    let (mut color, mut image) = match style.background.as_deref().and_then(|t| scope.fill(t)) {
-        Some(Fill::Color(c)) => (Some(Fill::Color(c)), None),
-        Some(gradient) => (None, Some(gradient)),
+    let (mut color, mut image) = match style.background.as_ref() {
+        Some(BackgroundValue::Text(text)) => match scope.fill(text) {
+            Some(Fill::Color(c)) => (Some(to_background(&Fill::Color(c))), None),
+            Some(gradient) => (None, Some(to_background(&gradient))),
+            None => (None, None),
+        },
+        Some(BackgroundValue::Gradient(gradient)) => (None, scope.gradient(gradient)),
         None => (None, None),
     };
     if let Some(text) = style.background_color.as_deref() {
-        color = scope.fill(text);
+        color = scope.fill(text).map(|fill| to_background(&fill));
     }
     if let Some(text) = style.background_image.as_deref() {
-        image = scope.fill(text);
+        image = scope.fill(text).map(|fill| to_background(&fill));
     }
     (color, image)
 }
@@ -595,11 +597,11 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
         el = el.left(gpui::px(left as f32));
     }
     let (background_color, background_image) = background_fills(style, scope);
-    if let Some(fill) = background_color {
-        el = el.bg(crate::color::to_background(&fill));
+    if let Some(background) = background_color {
+        el = el.bg(background);
     }
-    if let Some(fill) = background_image {
-        el = el.background_image(crate::color::to_background(&fill));
+    if let Some(image) = background_image {
+        el = el.background_image(image);
     }
     if let Some(mode) = style
         .background_blend_mode
@@ -1013,7 +1015,7 @@ mod tests {
 
         // The shorthand takes a gradient too, and it is the image.
         let shorthand = StyleDesc {
-            background: Some("linear-gradient(red, blue)".to_string()),
+            background: Some(BackgroundValue::Text("linear-gradient(red, blue)".to_string())),
             ..Default::default()
         };
         assert_eq!(background_of(&shorthand, &no_variables()), None);
@@ -1051,6 +1053,39 @@ mod tests {
         };
         let base = Resolved::build(&style, &no_variables()).base;
         assert!(base.effects.is_none());
+    }
+
+    #[test]
+    fn the_object_form_of_a_gradient_paints_in_its_colour_space() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"var(--from)","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
+        )
+        .unwrap();
+        let scope = variables(&[("--from", "#ff0000")]);
+        assert_eq!(background_of(&style, &scope), None);
+        let background = image_of(&style, &scope).expect("an image");
+        let stop = |hex: &str, position: f32| gpui::LinearColorStop {
+            color: crate::color::to_hsla(crate::color::from_gpui(
+                crate::color::parse_color_rgba(hex).unwrap(),
+            )),
+            percentage: position,
+            hint: 0.0,
+            easing: [0.0; 4],
+        };
+        let stops = [stop("#ff0000", 0.0), stop("#0000ff", 1.0)];
+        let in_oklab = gpui::linear_gradient_stops(gpui::GradientLine::Angle(90.0), &stops)
+            .color_space(gpui::ColorSpace::Oklab);
+        assert_eq!(background, in_oklab);
+        assert_ne!(
+            background,
+            gpui::linear_gradient_stops(gpui::GradientLine::Angle(90.0), &stops)
+        );
+
+        let out_of_range: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"red","position":0},{"color":"blue","position":2}]}}"##,
+        )
+        .unwrap();
+        assert!(image_of(&out_of_range, &no_variables()).is_none());
     }
 
     #[test]

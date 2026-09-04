@@ -153,7 +153,8 @@ describeNative("mutation lifecycle", () => {
 
   it("refuses a second simultaneous root on one renderer", () => {
     const renderer = new TestRenderer()
-    const first = createRoot(renderer)
+    const onFirstKey = vi.fn()
+    const first = createRoot(renderer, { onKeyDown: onFirstKey })
     const onFirst = vi.fn()
 
     try {
@@ -173,6 +174,8 @@ describeNative("mutation lifecycle", () => {
       // The rejected root must not have disturbed the live one.
       handleGpuixEvent({ elementId: renderer.getRoot()!.id, eventType: "click" }, renderer)
       expect(onFirst).toHaveBeenCalledTimes(1)
+      renderer.simulateKeystrokes("tab")
+      expect(onFirstKey).toHaveBeenCalledTimes(1)
     } finally {
       first.unmount()
     }

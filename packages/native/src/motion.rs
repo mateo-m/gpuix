@@ -624,7 +624,7 @@ mod tests {
             "animate": { "cornerShape": "square" },
             "transition": { "duration": 1.0, "ease": "linear" }
         });
-        let mut state = MotionState::new(&spec, started).unwrap();
+        let state = MotionState::new(&spec, started).unwrap();
         let frame = state.frame(started + Duration::from_millis(500));
         let mut style = StyleDesc::default();
         frame.style.apply_to(&mut style);
