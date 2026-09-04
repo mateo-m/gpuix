@@ -243,6 +243,15 @@ impl TestGpuixRenderer {
         Ok(destroyed.iter().map(|&id| id as f64).collect())
     }
 
+    /// How many elements the retained tree holds, reachable from the root or
+    /// not. `getTreeJson` walks from the root, so it cannot see a node that was
+    /// detached and never destroyed. This is the only way a test can prove a
+    /// removal actually freed it.
+    #[napi]
+    pub fn get_retained_element_count(&self) -> u32 {
+        self.tree.lock().unwrap().elements.len() as u32
+    }
+
     #[napi]
     pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
         let parent_id = to_element_id(parent_id)?;
@@ -769,16 +778,25 @@ impl TestGpuixRenderer {
     }
 
     /// Scroll a child into view by its index in the children list.
-    /// Call flush() after to apply and re-render.
+    /// Call flush() after to apply and re-render. For a `<virtual-list>` the
+    /// scroll is queued and applied on that flush, after the child splice.
+    /// `offset_in_item` is in pixels and may be negative, which anchors the
+    /// viewport top above the item.
     #[napi]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         with_test_state(|cx, window, view| {
             let view = view.clone();
             cx.update_window(window, |_, _window, app| {
                 view.update(app, |view, _cx| {
-                    if view.scroll_virtual_list_to_item(id, index) {
+                    if view.scroll_virtual_list_to_item(id, index, offset) {
                         return;
                     }
                     if let Some(handle) = view.scroll_handles.get(&id) {
@@ -788,6 +806,25 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
             Ok(())
+        })
+    }
+
+    /// The logical scroll anchor of a `<virtual-list>`:
+    /// `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+    /// else. `itemIndex == item count` is gpui's at-end sentinel.
+    #[napi]
+    pub fn get_list_scroll_top(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            let result = cx
+                .update_window(window, |_, _window, app| {
+                    view.update(app, |view, _cx| {
+                        view.virtual_list_scroll_top(id).map(|top| top.to_vec())
+                    })
+                })
+                .map_err(|e| Error::from_reason(e.to_string()))?;
+            Ok(result)
         })
     }
 

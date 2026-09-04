@@ -298,8 +298,16 @@ export const hostConfig = {
     parentState.container.renderer.appendChild(parent.id, child.id)
   },
 
+  // React only calls this from the deletion path, never to move a node, so the
+  // child is gone for good and has to be freed here. Detaching alone leaked
+  // every removed text node: `detachDeletedInstance` runs for host components
+  // only, so nothing else would ever destroy a `HostText`.
   removeChild(parent: Instance, child: Instance | TextInstance): void {
-    rendererFor(parent).removeChild(parent.id, child.id)
+    const container = containerFor(parent)
+    const destroyed = container.renderer.destroyElement(child.id)
+    for (const id of destroyed) {
+      unregisterEventHandlers(container.eventHandlers, id)
+    }
   },
 
   insertBefore(

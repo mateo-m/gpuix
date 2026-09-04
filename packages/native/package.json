@@ -1,6 +1,6 @@
 {
   "name": "@gpuix/native",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "license": "Apache-2.0",
   "main": "index.js",
   "types": "index.d.ts",
@@ -9,11 +9,8 @@
     "binaryName": "gpuix-native",
     "targets": [
       "aarch64-apple-darwin",
-      "x86_64-apple-darwin",
       "x86_64-unknown-linux-gnu",
-      "aarch64-unknown-linux-gnu",
-      "x86_64-pc-windows-msvc",
-      "aarch64-pc-windows-msvc"
+      "x86_64-pc-windows-msvc"
     ]
   },
   "repository": {
