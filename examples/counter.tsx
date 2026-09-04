@@ -120,4 +120,10 @@ function App() {
   )
 }
 
-render(<App />, { title: 'GPUIX Counter', width: 800, height: 600 })
+render(<App />, {
+  title: 'GPUIX Counter',
+  width: 800,
+  height: 600,
+  // Agent checks need real GPU paint, not control of the user's keyboard.
+  focus: process.env.GPUIX_BACKGROUND !== '1',
+})

@@ -3,6 +3,7 @@
 
 import { spawn } from "node:child_process"
 import { unlinkSync, writeFileSync } from "node:fs"
+import { createRequire } from "node:module"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import React, { useState } from "react"
@@ -13,6 +14,7 @@ import {
   render,
   resetRender,
 } from "../reconciler/renderer.js"
+import { handleGpuixEvent } from "../reconciler/event-registry.js"
 
 const srcDir = fileURLToPath(new URL("..", import.meta.url))
 
@@ -28,8 +30,24 @@ if (!slot.__hotRenderer) {
   slot.__hotRenderer = new TestRenderer()
 }
 const renderer = slot.__hotRenderer
-render(React.createElement("text", null, ${JSON.stringify(label)}), { renderer })
+render(
+  React.createElement(
+    "div",
+    {
+      onClick: () => console.log("HOT_CLICK", ${JSON.stringify(label)}),
+      style: { width: 100, height: 100 },
+    },
+    ${JSON.stringify(label)}
+  ),
+  { renderer }
+)
 renderer.flush()
+renderer.nativeSimulateClick(10, 10)
+const rootId = renderer.getRoot()?.id
+if (slot.__hotRootId !== undefined) {
+  console.log("HOT_NEW_ROOT_ID", rootId !== slot.__hotRootId)
+}
+slot.__hotRootId = rootId
 console.log("HOT_EVAL", slot.__hotEvals)
 console.log("HOT_LABEL", ${JSON.stringify(label)})
 console.log("HOT_TEXT", JSON.stringify(renderer.getAllText()))
@@ -60,6 +78,25 @@ function collectOutput(child: ReturnType<typeof spawn>) {
   }
 }
 
+describe("TestGpuixRenderer availability", () => {
+  it("exports a constructor, and a flag that is true only when construction works", () => {
+    const native = createRequire(import.meta.url)("@gpuix/native") as {
+      TestGpuixRenderer?: new (width?: number, height?: number) => unknown
+      hasTestGpuixRenderer?: () => boolean
+    }
+    expect(typeof native.TestGpuixRenderer).toBe("function")
+    expect(native.hasTestGpuixRenderer?.()).toBe(hasNativeTestRenderer)
+    if (hasNativeTestRenderer) {
+      const renderer = new native.TestGpuixRenderer!(1, 1)
+      expect(renderer).toBeTruthy()
+    } else {
+      expect(() => new native.TestGpuixRenderer!()).toThrow(
+        /macOS and Windows only.*wgpu cannot read a rendered image back yet.*GpuixRenderer still works/s
+      )
+    }
+  })
+})
+
 const describeNative = hasNativeTestRenderer ? describe : describe.skip
 
 describeNative("render()", () => {
@@ -88,6 +125,102 @@ describeNative("render()", () => {
     render(<text>world</text>, { renderer })
     renderer.flush()
     expect(renderer.getAllText()).toEqual(["world"])
+  })
+
+  it("does not deliver a queued window event to a remounted root", () => {
+    const received: string[] = []
+    const observed: string[] = []
+    render(<text>first</text>, {
+      renderer,
+      onKeyDown: () => received.push("first"),
+      onEvent: () => observed.push("first"),
+    })
+    render(<text>second</text>, {
+      renderer,
+      onKeyDown: () => received.push("second"),
+      onEvent: () => observed.push("second"),
+    })
+
+    handleGpuixEvent(
+      { elementId: 1, eventType: "windowKeyDown", key: "tab" },
+      renderer
+    )
+    handleGpuixEvent(
+      { elementId: 2, eventType: "windowKeyDown", key: "tab" },
+      renderer
+    )
+
+    expect(received).toEqual(["second"])
+    expect(observed).toEqual(["second"])
+  })
+
+  it("delivers Tab to elements and the renderer without moving focus", () => {
+    const windowKeys: string[] = []
+    const windowKeyUps: string[] = []
+    const elementKeys: string[] = []
+
+    render(
+      <div style={{ width: 200, height: 100 }}>
+        <div
+          autoFocus
+          tabIndex={0}
+          onKeyDown={(event) => {
+            elementKeys.push(
+              `first:${event.modifiers?.shift ? "shift-" : ""}${event.key}`
+            )
+          }}
+        />
+        <div
+          tabIndex={0}
+          onKeyDown={(event) => {
+            elementKeys.push(
+              `second:${event.modifiers?.shift ? "shift-" : ""}${event.key}`
+            )
+          }}
+        />
+      </div>,
+      {
+        renderer,
+        onKeyDown: (event) => {
+          windowKeys.push(`${event.modifiers?.shift ? "shift-" : ""}${event.key}`)
+        },
+        onKeyUp: (event) => {
+          windowKeyUps.push(`${event.modifiers?.shift ? "shift-" : ""}${event.key}`)
+        },
+      }
+    )
+    renderer.flush()
+
+    renderer.simulateKeystrokes("tab")
+    renderer.simulateKeystrokes("a")
+
+    const second = renderer
+      .findByType("div")
+      .filter((element) => element.events.has("keyDown"))[1]
+    renderer.focusElement(second.id)
+    renderer.simulateKeystrokes("shift-tab")
+    renderer.simulateKeystrokes("b")
+    renderer.nativeSimulateKeyUp(second.id, "shift-tab")
+
+    expect({ windowKeys, windowKeyUps, elementKeys }).toMatchInlineSnapshot(`
+      {
+        "elementKeys": [
+          "first:tab",
+          "first:a",
+          "second:shift-tab",
+          "second:b",
+        ],
+        "windowKeyUps": [
+          "shift-tab",
+        ],
+        "windowKeys": [
+          "tab",
+          "a",
+          "shift-tab",
+          "b",
+        ],
+      }
+    `)
   })
 
   it("remounts when the app component identity changes", () => {
@@ -178,6 +311,7 @@ describeNative("render()", () => {
     try {
       await output.wait("HOT_LABEL hello", 15_000)
       await output.wait('HOT_TEXT ["hello"]', 1000)
+      await output.wait("HOT_CLICK hello", 1000)
       await output.wait("HOT_SAME_RENDERER true", 1000)
       await new Promise((resolve) => setTimeout(resolve, 300))
 
@@ -185,6 +319,8 @@ describeNative("render()", () => {
 
       await output.wait("HOT_LABEL world", 15_000)
       await output.wait('HOT_TEXT ["world"]', 1000)
+      await output.wait("HOT_CLICK world", 1000)
+      await output.wait("HOT_NEW_ROOT_ID true", 1000)
       await output.wait("HOT_SAME_RENDERER true", 1000)
     } finally {
       child.kill("SIGTERM")

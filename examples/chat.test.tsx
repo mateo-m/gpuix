@@ -24,7 +24,7 @@ beforeAll(() => {
 
 describeNative('chat example', () => {
   it(
-    'fills and submits the live composer',
+    'drives mouse and keyboard input in the live app',
     async () => {
       const app = await launch({
         command: 'bun',
@@ -34,8 +34,17 @@ describeNative('chat example', () => {
       })
 
       try {
+        const sidebar = app.getByTestId('sidebar-collapse')
+        await sidebar.waitFor({ timeoutMs: 30_000 })
+        await Promise.race([
+          sidebar.click(),
+          new Promise((_, reject) =>
+            setTimeout(() => reject(new Error('live click timed out')), 5_000)
+          ),
+        ])
+        await app.getByTestId('sidebar-expand').waitFor()
+
         const composer = app.getByTestId('composer')
-        await composer.waitFor({ timeoutMs: 30_000 })
         await composer.fill('hello gpuix')
         await composer.press('enter')
         await app.getByText('hello gpuix').waitFor()

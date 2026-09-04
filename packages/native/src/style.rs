@@ -145,6 +145,105 @@ pub struct BoxShadowValue {
     pub color: String,
 }
 
+/// A `background` value.
+///
+/// The `style` prop sends CSS text. It also takes the object form
+/// `{ "type": "linear-gradient", "angle": 90, "stops": [...] }`. That form is
+/// the only way to ask for a colour space, because lightningcss does not read
+/// `in oklab` inside `linear-gradient()`.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum BackgroundValue {
+    Text(String),
+    Gradient(LinearGradientValue),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+pub enum GradientKind {
+    #[serde(rename = "linear-gradient")]
+    LinearGradient,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinearGradientValue {
+    #[serde(rename = "type")]
+    pub kind: GradientKind,
+    /// Degrees clockwise from `to top`.
+    pub angle: f64,
+    pub stops: Vec<LinearGradientStopValue>,
+    /// `srgb` or `oklab`. Unset means `srgb`.
+    #[serde(rename = "colorSpace", default, skip_serializing_if = "Option::is_none")]
+    pub color_space: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct LinearGradientStopValue {
+    pub color: String,
+    /// Where on the gradient line, from 0 to 1.
+    pub position: f64,
+}
+
+impl<'de> Deserialize<'de> for BackgroundValue {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        use serde::de::{self, MapAccess, Visitor};
+
+        struct BackgroundVisitor;
+
+        impl<'de> Visitor<'de> for BackgroundVisitor {
+            type Value = BackgroundValue;
+
+            fn expecting(&self, formatter: &mut std::fmt::Formatter) -> std::fmt::Result {
+                formatter.write_str("CSS background text or a linear-gradient object")
+            }
+
+            fn visit_str<E: de::Error>(self, value: &str) -> Result<BackgroundValue, E> {
+                Ok(BackgroundValue::Text(value.to_owned()))
+            }
+
+            fn visit_string<E: de::Error>(self, value: String) -> Result<BackgroundValue, E> {
+                Ok(BackgroundValue::Text(value))
+            }
+
+            fn visit_map<M: MapAccess<'de>>(self, map: M) -> Result<BackgroundValue, M::Error> {
+                LinearGradientValue::deserialize(de::value::MapAccessDeserializer::new(map))
+                    .map(BackgroundValue::Gradient)
+            }
+        }
+
+        deserializer.deserialize_any(BackgroundVisitor)
+    }
+}
+
+impl BackgroundValue {
+    /// Whether the value paints anything, read without variables or the
+    /// window. Text that does not read counts as painted, because a blocked
+    /// click is the smaller mistake.
+    fn paints(&self) -> bool {
+        match self {
+            BackgroundValue::Text(text) => text_paints(text),
+            BackgroundValue::Gradient(gradient) => gradient.stops.iter().any(|stop| {
+                gpuix_css::color::read(&stop.color, &gpuix_css::color::ColorContext::default())
+                    .map_or(true, |reading| reading.color.a > 0.0)
+            }),
+        }
+    }
+}
+
+fn text_paints(text: &str) -> bool {
+    use gpuix_css::background::Fill;
+    match gpuix_css::background::read(text, &gpuix_css::color::ColorContext::default()) {
+        Ok(Some(reading)) => match reading.fill {
+            Fill::Color(color) => color.a > 0.0,
+            Fill::LinearGradient(gradient) => gradient.stops.iter().any(|stop| stop.color.a > 0.0),
+        },
+        Ok(None) => false,
+        Err(_) => true,
+    }
+}
+
 /// What a sizing property resolves to.
 ///
 /// `width` and its family take `auto` and resolve a percentage against the
@@ -398,7 +497,7 @@ style_desc! {
     left: Option<Numeric> = "left",
 
     // Background & Colors
-    background: Option<String> = "background",
+    background: Option<BackgroundValue> = "background",
     background_color: Option<String> = "backgroundColor",
     background_image: Option<String> = "backgroundImage",
     /// How `backgroundImage` mixes with `backgroundColor`, a `<blend-mode>`.
@@ -595,17 +694,15 @@ pub fn should_occlude(style: &StyleDesc) -> bool {
     if matches!(style.position.as_deref(), Some("absolute") | Some("fixed")) {
         return true;
     }
-    let fill = style
+    let Some(painted) = style
         .background_color
         .as_deref()
-        .or(style.background.as_deref());
-    let Some(color) = fill else {
+        .map(text_paints)
+        .or_else(|| style.background.as_ref().map(BackgroundValue::paints))
+    else {
         return false;
     };
-    match crate::color::parse_color_rgba(color) {
-        Some(color) => color.a > 0.0,
-        None => true,
-    }
+    painted
 }
 
 /// Map a CSS `cursor` keyword onto a GPUI cursor. Unknown keywords return
@@ -776,11 +873,60 @@ mod tests {
     }
 
     #[test]
+    fn the_object_form_of_a_gradient_reads_its_stops_and_colour_space() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":90,"stops":[{"color":"#ff0000","position":0},{"color":"#0000ff","position":1}],"colorSpace":"oklab"}}"##,
+        )
+        .unwrap();
+        let Some(BackgroundValue::Gradient(gradient)) = style.background else {
+            panic!("expected the object form to read as a gradient");
+        };
+        assert_eq!(gradient.angle, 90.0);
+        assert_eq!(gradient.stops.len(), 2);
+        assert_eq!(gradient.stops[1].color, "#0000ff");
+        assert_eq!(gradient.color_space.as_deref(), Some("oklab"));
+    }
+
+    #[test]
+    fn an_object_of_another_type_is_not_a_background() {
+        let result = serde_json::from_str::<StyleDesc>(
+            r##"{"background":{"type":"radial-gradient","angle":0,"stops":[]}}"##,
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn transparent_gradient_does_not_occlude() {
+        let style: StyleDesc = serde_json::from_str(
+            r##"{"background":{"type":"linear-gradient","angle":0,"stops":[{"color":"transparent","position":0},{"color":"#00000000","position":1}]}}"##,
+        )
+        .unwrap();
+        assert!(!should_occlude(&style));
+
+        let text: StyleDesc =
+            serde_json::from_str(r##"{"background":"linear-gradient(transparent, #00000000)"}"##)
+                .unwrap();
+        assert!(!should_occlude(&text));
+        let painted: StyleDesc =
+            serde_json::from_str(r##"{"background":"linear-gradient(transparent, red)"}"##).unwrap();
+        assert!(should_occlude(&painted));
+    }
+
+    #[test]
     fn maps_the_timeline_cursors() {
-        assert_eq!(parse_cursor("col-resize"), Some(gpui::CursorStyle::ResizeColumn));
+        assert_eq!(
+            parse_cursor("col-resize"),
+            Some(gpui::CursorStyle::ResizeColumn)
+        );
         assert_eq!(parse_cursor("grab"), Some(gpui::CursorStyle::OpenHand));
-        assert_eq!(parse_cursor("grabbing"), Some(gpui::CursorStyle::ClosedHand));
-        assert_eq!(parse_cursor("pointer"), Some(gpui::CursorStyle::PointingHand));
+        assert_eq!(
+            parse_cursor("grabbing"),
+            Some(gpui::CursorStyle::ClosedHand)
+        );
+        assert_eq!(
+            parse_cursor("pointer"),
+            Some(gpui::CursorStyle::PointingHand)
+        );
         assert_eq!(parse_cursor("default"), Some(gpui::CursorStyle::Arrow));
     }
 

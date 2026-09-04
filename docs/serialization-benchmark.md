@@ -83,16 +83,16 @@ and the same styled elements before reporting any saving.
 
 ## The fixture
 
-10 000 turns with safe-mdx enabled. 221 764 ops, 72 010 elements, 13.05 MB of
+10 000 turns with safe-mdx enabled. 221 764 ops, 72 010 elements, 13.06 MB of
 JSON.
 
 | op | count | JSON bytes | share |
 |---|---:|---:|---:|
-| `setStyle` | 59 320 | 6.37 MB | 49.7% |
+| `setStyle` | 59 320 | 6.37 MB | 49.6% |
 | `createElement` | 72 010 | 2.10 MB | 16.4% |
 | `appendChild` | 72 009 | 1.92 MB | 15.0% |
-| `setCustomPropValue` | 6 142 | 1.73 MB | 13.5% |
-| `setText` | 12 255 | 0.70 MB | 5.4% |
+| `setCustomProp` | 6 142 | 1.70 MB | 13.2% |
+| `setText` | 12 255 | 0.74 MB | 5.8% |
 
 Two facts decide everything below.
 
@@ -394,8 +394,8 @@ Read these before quoting any phase-two number.
 - `KEYS` is one namespace for element types, event names and style property
   names, and the compact tree does `1 << (id % 32)`, so event bits collide.
 - The bench interners are thread-locals and are not reset between decode rows.
-- `setCustomPropValue` payloads still decode to `serde_json::Value` everywhere.
-  They are 1.73 MB of the fixture and hold its largest strings. They should stay
+- `setCustomProp` payloads still decode to `serde_json::Value` everywhere.
+  They are 1.70 MB of the fixture and hold its largest strings. They should stay
   a `Value`, because `build_element` reads `custom_props` every frame and
   reparsing there would be a frame-time regression, but the **clone** is gone.
 - Escaped strings are rare here: exactly one of 312 198 value strings needed

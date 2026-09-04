@@ -448,7 +448,7 @@ describeNative("floating controls", () => {
     expect(testRoot.renderer.getAllText()).toEqual(["Hover me"])
   })
 
-  it("moves through tab-indexed controls", () => {
+  it("moves through tab-indexed controls explicitly", () => {
     function Demo() {
       const [focused, setFocused] = useState("none")
       return (
@@ -474,9 +474,15 @@ describeNative("floating controls", () => {
     }
 
     testRoot.render(<Demo />)
-    testRoot.renderer.simulateKeystrokes("tab a")
+    testRoot.renderer.focusNext()
+    testRoot.renderer.simulateKeystrokes("a")
 
     expect(testRoot.renderer.getAllText()).toContain("Focused: second")
+
+    testRoot.renderer.focusPrevious()
+    testRoot.renderer.simulateKeystrokes("a")
+
+    expect(testRoot.renderer.getAllText()).toContain("Focused: first")
   })
 
   it("removes an element from tab order when tabIndex is removed", () => {
@@ -508,7 +514,8 @@ describeNative("floating controls", () => {
 
     testRoot.render(<Demo />)
     testRoot.renderer.nativeSimulateClick(30, 16)
-    testRoot.renderer.simulateKeystrokes("tab a")
+    testRoot.renderer.focusNext()
+    testRoot.renderer.simulateKeystrokes("a")
 
     expect(testRoot.renderer.getAllText()).toContain("Focused: first")
   })

@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
+    "blurred-window": "bun --hot blurred-window.tsx",
     "counter": "bun --hot counter.tsx",
     "diff": "bun --hot diff.tsx",
     "test": "vitest run --exclude '**/*.perf.test.tsx'",
@@ -17,7 +18,7 @@
     "bench:serde": "bun bench-serialization.ts"
   },
   "dependencies": {
-    "@gpuix/react": "workspace:*",
+    "@gpuix/react": "workspace:^",
     "@kmamal/sdl": "^0.11.12",
     "diff": "^7.0.0",
     "react": "^19.2.4",

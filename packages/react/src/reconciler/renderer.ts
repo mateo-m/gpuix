@@ -24,11 +24,8 @@ export function createRenderer(
       console.error("[GPUIX] Native event error:", err)
       return
     }
-    if (event) {
-      handleGpuixEvent(event, renderer)
-      if (onEvent) {
-        onEvent(event)
-      }
+    if (handleGpuixEvent(event, renderer) && onEvent) {
+      onEvent(event)
     }
   })
   // A pipe means a controller owns stdin. A TTY is a human keyboard.
@@ -51,15 +48,17 @@ export interface FrameLoop {
 }
 
 /**
- * Drive GPUI's embedded macOS event loop at a fixed rate.
- *
- * On Windows and Linux, GPUI owns a blocking event loop on a Rust UI thread,
- * so this function returns a no-op handle without creating a timer.
+ * Drive GPUI until the last window closes, then run `onTerminated`.
  *
  * On macOS, `renderer.tick()` pumps AppKit and asks GPUI for a frame, so it
  * must be called repeatedly. Do NOT call it from a `setImmediate` loop: that
  * spins the CPU at tens of thousands of ticks per second (measured: 73% CPU on
  * an idle app, versus 1.5% when paced).
+ *
+ * On Windows and Linux, GPUI owns a blocking event loop on a Rust UI thread.
+ * `tick()` does not pump that loop. It only reports whether the UI thread is
+ * still inside `Platform::run`. The timer still exists so last-window-close
+ * can return false and `render()` can `process.exit`, matching macOS.
  *
  * Pacing lives in JS rather than blocking inside `tick()` on purpose. Node owns
  * the event loop here, so a blocking tick would stall every timer, promise and
@@ -137,9 +136,6 @@ type RenderSlot = {
   renderer?: NativeRenderer
   root?: Root
   loop?: FrameLoop
-  /// The `onEvent` of the latest `render()` call. The native callback closes
-  /// over the slot, not over the option, so a hot reload can swap it.
-  onEvent?: (event: EventPayload) => void
 }
 
 function renderSlot(): RenderSlot {
@@ -171,18 +167,22 @@ export function resetRender(): void {
 
 /** Mount the app. Under `bun --hot`, later calls remount on the same native window. */
 export function render(node: ReactNode, options: RenderOptions = {}): Root {
-  // resolveClassName reaches createRoot through `options`. The destructure
-  // only keeps it out of `windowOptions`, which goes to the native window.
-  const { onEvent, renderer: injected, debugFrameOverlay, resolveClassName, ...windowOptions } = options
-  void resolveClassName
+  const {
+    onEvent,
+    onKeyDown,
+    onKeyUp,
+    renderer: injected,
+    debugFrameOverlay,
+  resolveClassName,
+    ...windowOptions
+  } = options
   const slot = renderSlot()
   const remount = slot.root != null
-  slot.onEvent = onEvent
   if (!slot.renderer) {
     if (injected) {
       slot.renderer = injected
     } else {
-      const renderer = createRenderer((event) => slot.onEvent?.(event))
+      const renderer = createRenderer()
       renderer.init(windowOptions)
       slot.renderer = renderer
       console.log("[gpuix] created native window")
@@ -206,7 +206,7 @@ export function render(node: ReactNode, options: RenderOptions = {}): Root {
     console.log("[gpuix] remount: unmount previous tree")
     slot.root.unmount()
   }
-  const root = createRoot(host, options)
+  const root = createRoot(host, { onEvent, onKeyDown, onKeyUp, resolveClassName })
   slot.root = root
   flushSync(() => {
     root.render(node)

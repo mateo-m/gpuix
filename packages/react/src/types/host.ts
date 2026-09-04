@@ -116,6 +116,20 @@ export interface BoxShadow {
  */
 export type Numeric = number | string
 
+export interface LinearGradientStop {
+  color: string
+  /** Position along the gradient from 0 to 1. */
+  position: number
+}
+
+export interface LinearGradientBackground {
+  type: "linear-gradient"
+  /** CSS angle in degrees. 0 points up and values increase clockwise. */
+  angle: number
+  stops: [LinearGradientStop, LinearGradientStop]
+  colorSpace?: "srgb" | "oklab"
+}
+
 export interface StyleDesc {
   display?: string
   visibility?: string
@@ -163,7 +177,7 @@ export interface StyleDesc {
 
   /** A colour or a `linear-gradient()`. The shorthand, so both longhands
    *  win over it. */
-  background?: string
+  background?: string | LinearGradientBackground
   backgroundColor?: string
   /** A `linear-gradient()` or `none`, painted over `backgroundColor` the
    *  way a browser paints it. Stop positions are percentages.
@@ -773,27 +787,17 @@ export interface AnchoredProps extends Props {
   occlude?: boolean
 }
 
-/// Interface for the renderer that receives mutations from the reconciler.
-/// Implemented by the real napi GpuixRenderer and by TestRenderer (which
-/// delegates to native TestGpuixRenderer for tests).
+/// Native renderer transport. React sends one atomic batch per commit.
 export interface NativeRenderer {
-  createElement(id: number, elementType: string): void
-  destroyElement(id: number): Array<number>
-  appendChild(parentId: number, childId: number): void
-  removeChild(parentId: number, childId: number): void
-  insertBefore(parentId: number, childId: number, beforeId: number): void
-  setStyle(id: number, styleJson: string | object): void
-  setText(id: number, content: string): void
-  setEventListener(id: number, eventType: string, hasHandler: boolean): void
-  setRoot(id: number): void
-  commitMutations(): void
-  setCustomProp(id: number, key: string, valueJson: string | object | number | boolean | null): void
-  /** Apply a batch of mutations in a single FFI call. Returns destroyed IDs. */
-  applyBatch?(json: string): Array<number>
+  /** Apply one React commit. Returns every element id destroyed by the batch. */
+  applyBatch(json: string): Array<number>
 
   // ── Focus API ──────────────────────────────────────────────────
   focusElement?(elementId: number): void
+  focusNext?(): void
+  focusPrevious?(): void
   blur?(): void
+  setWindowKeyEvents?(keyDown: boolean, keyUp: boolean, eventId: number): void
 
   // ── Scroll API ─────────────────────────────────────────────────
   /** Set the scroll offset of a scrollable element (overflow: "scroll").
@@ -849,6 +853,20 @@ export interface NativeRenderer {
   getDebugFrameOverlayStats?(): DebugFrameOverlayStats
 }
 
+/** Commit-phase facade used only by the React host config. */
+export interface MutationRenderer {
+  createElement(id: number, elementType: string): void
+  destroyElement(id: number): Array<number>
+  appendChild(parentId: number, childId: number): void
+  insertBefore(parentId: number, childId: number, beforeId: number): void
+  setStyle(id: number, style: object): void
+  setText(id: number, content: string): void
+  setEventListener(id: number, eventType: string, hasHandler: boolean): void
+  setRoot(id: number): void
+  setCustomProp(id: number, key: string, value: object | string | number | boolean | null): void
+  flushMutations(): void
+}
+
 export type DebugFrameOverlayMode = "hidden" | "minimal" | "full"
 
 export interface EdgeInsets {
@@ -878,6 +896,22 @@ export type EventHandlerMap = Map<
   Map<string, (event: EventPayload) => void>
 >
 
+export type WindowKeyEventHandler = (
+  event: EventPayload,
+  renderer: NativeRenderer
+) => void
+
+export interface WindowKeyEventHandlers {
+  /** Window-level GPUI listener. Key actions can consume an event before this runs. */
+  onKeyDown?: WindowKeyEventHandler
+  /** Window-level GPUI listener. */
+  onKeyUp?: WindowKeyEventHandler
+}
+
+export interface RootEventHandlers extends WindowKeyEventHandlers {
+  onEvent?: (event: EventPayload) => void
+}
+
 export interface ElementIdAllocator {
   nextElementId: number
 }
@@ -886,9 +920,12 @@ export interface ElementIdAllocator {
 // can both use id 1. Ids come from an allocator that lives with the
 // NativeRenderer, so a remount on the same renderer cannot reuse them.
 export interface Container {
-  renderer: NativeRenderer
+  renderer: MutationRenderer
   ids: ElementIdAllocator
   eventHandlers: EventHandlerMap
+  windowKeyEventHandlers: WindowKeyEventHandlers
+  windowKeyEventId: number
+  onEvent?: (event: EventPayload) => void
   /** How this root reads `className`, or `null` when nothing registered one. */
   classNames: ClassNameCache | null
   /** Whether this root has already warned that it has no resolver. */
@@ -913,7 +950,7 @@ export interface ClassNameCache {
 }
 
 /** Options for a root. */
-export interface RootOptions {
+export interface RootOptions extends RootEventHandlers {
   /**
    * How to read `className` on this root's elements.
    *
