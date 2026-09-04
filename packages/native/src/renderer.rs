@@ -39,7 +39,7 @@ use crate::custom_elements::CustomElementRegistry;
 use crate::element_tree::EventPayload;
 use crate::retained_tree::RetainedTree;
 // Custom elements still style their own sub-parts directly.
-pub(crate) use crate::style::resolve::{apply_styles, parse_font_weight};
+pub(crate) use crate::style::resolve::{apply_interactive_styles, apply_styles, parse_font_weight};
 use crate::text::{selection_frame_reset, SharedSelection};
 use crate::theme::Theme;
 
@@ -135,6 +135,30 @@ thread_local! {
     /// TODO: Scope by renderer/window ID when multi-window support is added.
     static SCROLL_HANDLES: RefCell<HashMap<u64, gpui::ScrollHandle>> = RefCell::new(HashMap::new());
     static VIRTUAL_LIST_STATES: RefCell<HashMap<u64, gpui::ListState>> = RefCell::new(HashMap::new());
+    /// Virtual-list scrolls queued for the next `GpuixView::render`, applied
+    /// AFTER `VirtualListEntry::sync` splices that frame's child changes.
+    ///
+    /// Never applied eagerly: JS computes row indices against the child list it
+    /// just committed, but that commit only reaches `gpui::ListState` when the
+    /// next render splices it in. An eager `scroll_to` would be shifted a
+    /// second time by `splice_focusable` and land on the wrong row.
+    static PENDING_VIRTUAL_LIST_SCROLLS: RefCell<HashMap<u64, gpui::ListOffset>> =
+        RefCell::new(HashMap::new());
+}
+
+/// Queue a virtual-list scroll for the next render. `offset_in_item` may be
+/// negative: gpui then anchors the viewport top above the item, which is what
+/// keeps a row pixel-stable while unmeasured rows are spliced in above it.
+pub(crate) fn queue_virtual_list_scroll(id: u64, index: usize, offset_in_item: f32) {
+    PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| {
+        cell.borrow_mut().insert(
+            id,
+            gpui::ListOffset {
+                item_ix: index,
+                offset_in_item: gpui::px(offset_in_item),
+            },
+        );
+    });
 }
 
 fn parse_debug_frame_overlay_mode_str(
@@ -212,6 +236,28 @@ fn update_window<R>(
 }
 
 #[cfg(target_os = "macos")]
+// Keyboard handlers can update GpuixView, so dispatch without leasing the root view.
+fn update_window_without_view<R>(
+    update: impl FnOnce(&mut gpui::Window, &mut gpui::App) -> R,
+) -> Result<R> {
+    let window = GPUI_WINDOW
+        .with(|window| *window.borrow())
+        .ok_or_else(|| Error::from_reason("GPUI window is not initialized"))?;
+
+    GPUI_APP.with(|app| {
+        let app = app.borrow();
+        let app = app
+            .as_ref()
+            .ok_or_else(|| Error::from_reason("GPUI application is not initialized"))?;
+        app.update(|cx| {
+            gpui::AnyWindowHandle::from(window)
+                .update(cx, move |_view, window, cx| update(window, cx))
+                .map_err(|error| Error::from_reason(error.to_string()))
+        })
+    })
+}
+
+#[cfg(target_os = "macos")]
 fn invalidate_window() -> Result<()> {
     update_window(|_view, window, cx| {
         cx.notify();
@@ -255,6 +301,13 @@ enum MouseInput {
 }
 
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+enum KeyInput {
+    Keystrokes(String),
+    Down { keystroke: String, is_held: bool },
+    Up(String),
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum ClockControl {
     Pause,
     Set(f64),
@@ -265,6 +318,7 @@ enum ClockControl {
 #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
 enum UiCommand {
     Invalidate,
+    ActivateWindow,
     SetWindowTitle(String),
     SetDebugFrameOverlay(gpui::DebugFrameOverlayMode),
     CycleDebugFrameOverlay {
@@ -285,6 +339,7 @@ enum UiCommand {
     ScrollToItem {
         id: u64,
         index: usize,
+        offset: f32,
     },
     ScrollIntoView {
         id: u64,
@@ -294,6 +349,10 @@ enum UiCommand {
     GetScrollOffset {
         id: u64,
         response: SyncSender<Option<[f64; 2]>>,
+    },
+    GetListScrollTop {
+        id: u64,
+        response: SyncSender<Option<[f64; 3]>>,
     },
     GetAutomationBounds {
         response: SyncSender<HashMap<u64, crate::automation::ElementBounds>>,
@@ -312,6 +371,10 @@ enum UiCommand {
     },
     DispatchMouse {
         input: MouseInput,
+        response: SyncSender<std::result::Result<(), String>>,
+    },
+    DispatchKey {
+        input: KeyInput,
         response: SyncSender<std::result::Result<(), String>>,
     },
     #[cfg(all(target_os = "windows", feature = "test-support"))]
@@ -342,6 +405,10 @@ async fn run_ui_commands(
     while let Some(command) = commands.next().await {
         let result = match command {
             UiCommand::Invalidate => refresh_ui_window(window, cx),
+            UiCommand::ActivateWindow => window.update(cx, |_view, window, cx| {
+                cx.activate(true);
+                window.activate_window();
+            }),
             UiCommand::SetWindowTitle(title) => window.update(cx, move |view, window, cx| {
                 view.window_title = title;
                 cx.notify();
@@ -400,16 +467,12 @@ async fn run_ui_commands(
                 }
                 refresh_ui_window(window, cx)
             }
-            UiCommand::ScrollToItem { id, index } => {
+            UiCommand::ScrollToItem { id, index, offset } => {
                 if !VIRTUAL_LIST_STATES.with(|cell| {
-                    let states = cell.borrow();
-                    let Some(state) = states.get(&id) else {
+                    if !cell.borrow().contains_key(&id) {
                         return false;
-                    };
-                    state.scroll_to(gpui::ListOffset {
-                        item_ix: index,
-                        offset_in_item: gpui::px(0.0),
-                    });
+                    }
+                    queue_virtual_list_scroll(id, index, offset);
                     true
                 }) {
                     SCROLL_HANDLES.with(|cell| {
@@ -448,6 +511,20 @@ async fn run_ui_commands(
                         })
                     });
                 response.send(offset).ok();
+                Ok(())
+            }
+            UiCommand::GetListScrollTop { id, response } => {
+                let top = VIRTUAL_LIST_STATES.with(|cell| {
+                    cell.borrow().get(&id).map(|state| {
+                        let top = state.logical_scroll_top();
+                        [
+                            top.item_ix as f64,
+                            f64::from(f32::from(top.offset_in_item)),
+                            f64::from(f32::from(state.viewport_bounds().size.height)),
+                        ]
+                    })
+                });
+                response.send(top).ok();
                 Ok(())
             }
             UiCommand::GetWindowSize { response } => window.update(cx, move |_view, window, _cx| {
@@ -560,6 +637,30 @@ async fn run_ui_commands(
                     .ok();
                 result
             }
+            UiCommand::DispatchKey { input, response } => {
+                let result = gpui::AnyWindowHandle::from(window)
+                    .update(cx, move |_view, window, cx| match input {
+                        KeyInput::Keystrokes(keystrokes) => {
+                            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+                        }
+                        KeyInput::Down { keystroke, is_held } => {
+                            crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
+                        }
+                        KeyInput::Up(keystroke) => {
+                            crate::automation::dispatch_key_up(window, cx, &keystroke)
+                        }
+                    })
+                    .and_then(|result| result.map_err(anyhow::Error::msg));
+                response
+                    .send(
+                        result
+                            .as_ref()
+                            .map(|_| ())
+                            .map_err(|error| format!("{error:#}")),
+                    )
+                    .ok();
+                result
+            }
             #[cfg(all(target_os = "windows", feature = "test-support"))]
             UiCommand::CaptureScreenshot { path, response } => {
                 let error_response = response.clone();
@@ -645,6 +746,16 @@ impl GpuixRenderer {
             response: response_sender,
         })?;
         recv_ui_response(response_receiver, "the GPUI UI command")?.map_err(Error::from_reason)
+    }
+
+    #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+    fn dispatch_key_input(&self, input: KeyInput) -> Result<()> {
+        let (response_sender, response_receiver) = sync_channel(1);
+        self.send_ui_command(UiCommand::DispatchKey {
+            input,
+            response: response_sender,
+        })?;
+        recv_ui_response(response_receiver, "the GPUI key command")?.map_err(Error::from_reason)
     }
 
     fn automation_bounds(&self) -> Result<HashMap<u64, crate::automation::ElementBounds>> {
@@ -771,6 +882,9 @@ impl GpuixRenderer {
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
         let app_name = options.app_name.clone().unwrap_or_else(|| title.clone());
+        // `focus: false` must also skip `cx.activate`: the window flag only
+        // decides key status inside the app, activation is what steals focus.
+        let activate = options.focus.unwrap_or(true);
         let window_options = options.clone();
 
         let platform = Rc::new(gpui_macos::MacPlatform::new_embedded());
@@ -809,7 +923,9 @@ impl GpuixRenderer {
             ) {
                 Ok(window_handle) => {
                     *opened_window_for_app.borrow_mut() = Some(window_handle);
-                    cx.activate(true);
+                    if activate {
+                        cx.activate(true);
+                    }
                 }
                 Err(error) => {
                     *startup_error_for_app.borrow_mut() = Some(error.to_string());
@@ -864,6 +980,9 @@ impl GpuixRenderer {
         let width = options.width.unwrap_or(800.0);
         let height = options.height.unwrap_or(600.0);
         let title = options.title.clone().unwrap_or_else(|| "GPUIX".to_string());
+        // `focus: false` must also skip `cx.activate`: the window flag only
+        // decides key status inside the app, activation is what steals focus.
+        let activate = options.focus.unwrap_or(true);
         let window_options = options.clone();
         let tree = self.tree.clone();
         let selection = self.selection.clone();
@@ -906,7 +1025,9 @@ impl GpuixRenderer {
                             run_ui_commands(command_receiver, window, cx).await;
                         })
                         .detach();
-                        cx.activate(true);
+                        if activate {
+                            cx.activate(true);
+                        }
                         startup_sender.send(Ok(())).ok();
                     });
                 }));
@@ -1336,6 +1457,30 @@ impl GpuixRenderer {
         Err(Error::from_reason("Unsupported operating system"))
     }
 
+    /// Bring the window forward and give it focus. This is how a window opened
+    /// with `show: false` or `focus: false` is revealed later.
+    #[napi]
+    pub fn activate_window(&self) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window(|_view, window, cx| {
+            cx.activate(true);
+            window.activate_window();
+        });
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.send_ui_command(UiCommand::ActivateWindow);
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        Err(Error::from_reason(
+            "The production GPUIX renderer does not support this operating system",
+        ))
+    }
+
     #[napi]
     pub fn set_window_title(&self, title: String) -> Result<()> {
         #[cfg(target_os = "macos")]
@@ -1460,20 +1605,28 @@ impl GpuixRenderer {
     }
 
     /// Scroll a child into view by its index in the children list.
+    ///
+    /// For a `<virtual-list>` the scroll is queued and applied on the next
+    /// render, after that frame's child splice, so indices computed against a
+    /// just-committed child list are never shifted twice. `offsetInItem` is in
+    /// pixels and may be negative, which anchors the viewport top above the
+    /// item and resolves against measured heights at layout time.
     #[napi]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<()> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<()> {
         let id = to_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         #[cfg(target_os = "macos")]
         if !VIRTUAL_LIST_STATES.with(|cell| {
-            let states = cell.borrow();
-            let Some(state) = states.get(&id) else {
+            if !cell.borrow().contains_key(&id) {
                 return false;
-            };
-            state.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.0),
-            });
+            }
+            queue_virtual_list_scroll(id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|cell| {
@@ -1487,7 +1640,48 @@ impl GpuixRenderer {
         return invalidate_window();
 
         #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
-        return self.send_ui_command(UiCommand::ScrollToItem { id, index });
+        return self.send_ui_command(UiCommand::ScrollToItem { id, index, offset });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = offset;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    /// The logical scroll anchor of a `<virtual-list>`:
+    /// `[itemIndex, offsetInItemPx, viewportHeightPx]`, or null for anything
+    /// else. `itemIndex == item count` is gpui's at-end sentinel.
+    ///
+    /// Unlike `getScrollOffset` this is exact even while row heights are still
+    /// estimates, because it is the anchor gpui itself scrolls by.
+    #[napi]
+    pub fn get_list_scroll_top(&self, element_id: f64) -> Result<Option<Vec<f64>>> {
+        let id = to_element_id(element_id)?;
+        #[cfg(target_os = "macos")]
+        return Ok(VIRTUAL_LIST_STATES.with(|cell| {
+            cell.borrow().get(&id).map(|state| {
+                let top = state.logical_scroll_top();
+                vec![
+                    top.item_ix as f64,
+                    f64::from(f32::from(top.offset_in_item)),
+                    f64::from(f32::from(state.viewport_bounds().size.height)),
+                ]
+            })
+        }));
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        {
+            let (response, receiver) = sync_channel(1);
+            self.send_ui_command(UiCommand::GetListScrollTop { id, response })?;
+            return Ok(recv_ui_response(receiver, "the GPUI list scroll query")?
+                .map(|top| top.to_vec()));
+        }
 
         #[cfg(not(any(
             target_os = "macos",
@@ -1582,6 +1776,78 @@ impl GpuixRenderer {
             .into_iter()
             .map(Into::into)
             .collect()
+    }
+
+    /// Simulate space-separated keystrokes through the focused element's input pipeline.
+    #[napi]
+    pub fn simulate_keystrokes(&self, keystrokes: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_keystrokes(window, cx, &keystrokes)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_key_input(KeyInput::Keystrokes(keystrokes));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = keystrokes;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    #[napi]
+    pub fn simulate_key_down(&self, keystroke: String, is_held: Option<bool>) -> Result<()> {
+        let is_held = is_held.unwrap_or(false);
+
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_key_down(window, cx, &keystroke, is_held)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_key_input(KeyInput::Down { keystroke, is_held });
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = (keystroke, is_held);
+            Err(Error::from_reason("Unsupported operating system"))
+        }
+    }
+
+    #[napi]
+    pub fn simulate_key_up(&self, keystroke: String) -> Result<()> {
+        #[cfg(target_os = "macos")]
+        return update_window_without_view(move |window, cx| {
+            crate::automation::dispatch_key_up(window, cx, &keystroke)
+        })?
+        .map_err(Error::from_reason);
+
+        #[cfg(any(target_os = "windows", target_os = "linux", target_os = "freebsd"))]
+        return self.dispatch_key_input(KeyInput::Up(keystroke));
+
+        #[cfg(not(any(
+            target_os = "macos",
+            target_os = "windows",
+            target_os = "linux",
+            target_os = "freebsd"
+        )))]
+        {
+            let _ = keystroke;
+            Err(Error::from_reason("Unsupported operating system"))
+        }
     }
 
     /// `modifiers` uses the `press()` syntax: "cmd", "cmd-shift", "alt".
@@ -2304,18 +2570,20 @@ impl WebGpuixRenderer {
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = scrollToItem)]
-    pub fn scroll_to_item(&self, element_id: f64, index: f64) -> Result<(), wasm_bindgen::JsValue> {
+    pub fn scroll_to_item(
+        &self,
+        element_id: f64,
+        index: f64,
+        offset_in_item: Option<f64>,
+    ) -> Result<(), wasm_bindgen::JsValue> {
         let id = web_element_id(element_id)?;
         let index = index as usize;
+        let offset = offset_in_item.unwrap_or(0.0) as f32;
         if !VIRTUAL_LIST_STATES.with(|states| {
-            let states = states.borrow();
-            let Some(state) = states.get(&id) else {
+            if !states.borrow().contains_key(&id) {
                 return false;
-            };
-            state.scroll_to(gpui::ListOffset {
-                item_ix: index,
-                offset_in_item: gpui::px(0.0),
-            });
+            }
+            queue_virtual_list_scroll(id, index, offset);
             true
         }) {
             SCROLL_HANDLES.with(|handles| {
@@ -2326,6 +2594,28 @@ impl WebGpuixRenderer {
         }
         notify_web();
         Ok(())
+    }
+
+    #[wasm_bindgen::prelude::wasm_bindgen(js_name = getListScrollTop)]
+    pub fn get_list_scroll_top(
+        &self,
+        element_id: f64,
+    ) -> Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue> {
+        let id = web_element_id(element_id)?;
+        let top = VIRTUAL_LIST_STATES.with(|states| {
+            states.borrow().get(&id).map(|state| {
+                let top = state.logical_scroll_top();
+                [
+                    top.item_ix as f64,
+                    f64::from(f32::from(top.offset_in_item)),
+                    f64::from(f32::from(state.viewport_bounds().size.height)),
+                ]
+            })
+        });
+        let Some(top) = top else {
+            return Ok(wasm_bindgen::JsValue::NULL);
+        };
+        Ok(web_number_array(top))
     }
 
     #[wasm_bindgen::prelude::wasm_bindgen(js_name = getScrollOffset)]
@@ -2881,19 +3171,37 @@ impl GpuixView {
             .into_any_element()
     }
 
-    pub(crate) fn scroll_virtual_list_to_item(&self, id: u64, index: usize) -> bool {
-        let Some(entry) = self.virtual_lists.get(&id) else {
+    pub(crate) fn scroll_virtual_list_to_item(
+        &self,
+        id: u64,
+        index: usize,
+        offset_in_item: f32,
+    ) -> bool {
+        if !self.virtual_lists.contains_key(&id) {
             return false;
-        };
-        entry.state.scroll_to(gpui::ListOffset {
-            item_ix: index,
-            offset_in_item: gpui::px(0.0),
-        });
+        }
+        queue_virtual_list_scroll(id, index, offset_in_item);
         emit_event_full(&self.event_callback, id, "visibleRange", |payload| {
             payload.start_index = Some(index as f64);
             payload.end_index = Some((index + 1) as f64);
         });
         true
+    }
+
+    /// The list's logical scroll anchor as
+    /// `[item_ix, offset_in_item_px, viewport_height_px]`.
+    ///
+    /// `item_ix == item count` is gpui's at-end sentinel (a bottom-aligned
+    /// list resting at its very end); the viewport height is what lets a
+    /// caller convert that into a position relative to the trailing rows.
+    pub(crate) fn virtual_list_scroll_top(&self, id: u64) -> Option<[f64; 3]> {
+        let state = &self.virtual_lists.get(&id)?.state;
+        let top = state.logical_scroll_top();
+        Some([
+            top.item_ix as f64,
+            f64::from(f32::from(top.offset_in_item)),
+            f64::from(f32::from(state.viewport_bounds().size.height)),
+        ])
     }
 
     pub(crate) fn set_virtual_list_offset(&self, id: u64, x: f32, y: f32) -> bool {
@@ -2941,7 +3249,7 @@ impl GpuixView {
         let Some((list_id, index)) = location else {
             return false;
         };
-        self.scroll_virtual_list_to_item(list_id, index)
+        self.scroll_virtual_list_to_item(list_id, index, 0.0)
     }
 }
 
@@ -3059,7 +3367,7 @@ impl gpui::Render for GpuixView {
 
         // Clean up scroll handles for destroyed elements (IDs removed from tree).
         // Scrollability-based cleanup (element still exists but style changed
-        // from scroll to non-scroll) is handled inside build_div().
+        // from scroll to non-scroll) is handled inside build_host_container().
         self.scroll_handles
             .retain(|id, _| tree.elements.contains_key(id));
         self.virtual_lists
@@ -3144,6 +3452,10 @@ impl gpui::Render for GpuixView {
                 states.insert(id, entry.state.clone());
             }
         });
+        // One-shot: a queued scroll for a list that did not build this frame
+        // would otherwise fire on some later frame, against child indices that
+        // no longer match what JS meant.
+        PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().clear());
 
         if motion_active {
             window.request_animation_frame();
@@ -3313,6 +3625,12 @@ pub struct WindowOptions {
     pub window_background: Option<String>,
     pub traffic_light_x: Option<f64>,
     pub traffic_light_y: Option<f64>,
+    /// Give the window key focus when it opens. `false` opens it behind the
+    /// active app, like `open -g`. Ignored on Linux.
+    pub focus: Option<bool>,
+    /// Show the window when it opens. `false` opens it hidden; call
+    /// `activateWindow()` to reveal it. Ignored on Linux.
+    pub show: Option<bool>,
 }
 
 impl Default for WindowOptions {
@@ -3331,6 +3649,8 @@ impl Default for WindowOptions {
             window_background: None,
             traffic_light_x: None,
             traffic_light_y: None,
+            focus: Some(true),
+            show: Some(true),
         }
     }
 }
@@ -3373,6 +3693,8 @@ fn to_gpui_window_options(
         is_resizable: options.resizable.unwrap_or(true),
         window_background,
         window_min_size,
+        focus: options.focus.unwrap_or(true),
+        show: options.show.unwrap_or(true),
         ..Default::default()
     }
 }
@@ -3737,5 +4059,80 @@ mod batch_tests {
         apply(&mut tree, r#"[["destroyElement",1]]"#).expect("valid batch");
         tree.styles.sweep();
         assert_eq!(tree.styles.len(), 0);
+    }
+}
+
+#[cfg(test)]
+mod window_options_tests {
+    use super::*;
+
+    fn mapped(options: WindowOptions) -> gpui::WindowOptions {
+        let bounds = gpui::Bounds {
+            origin: gpui::point(gpui::px(0.0), gpui::px(0.0)),
+            size: gpui::size(gpui::px(800.0), gpui::px(600.0)),
+        };
+        to_gpui_window_options(&options, bounds)
+    }
+
+    #[test]
+    fn defaults_open_a_focused_visible_window() {
+        let gpui_options = mapped(WindowOptions::default());
+        assert!(gpui_options.focus);
+        assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn unset_focus_and_show_still_default_to_true() {
+        let gpui_options = mapped(WindowOptions {
+            focus: None,
+            show: None,
+            ..WindowOptions::default()
+        });
+        assert!(gpui_options.focus);
+        assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn focus_false_leaves_the_window_visible() {
+        let gpui_options = mapped(WindowOptions {
+            focus: Some(false),
+            ..WindowOptions::default()
+        });
+        assert!(!gpui_options.focus);
+        assert!(gpui_options.show);
+    }
+
+    #[test]
+    fn show_false_keeps_focus_independent() {
+        let gpui_options = mapped(WindowOptions {
+            show: Some(false),
+            ..WindowOptions::default()
+        });
+        assert!(!gpui_options.show);
+        assert!(gpui_options.focus);
+    }
+
+    #[test]
+    fn existing_options_are_still_mapped() {
+        let gpui_options = mapped(WindowOptions {
+            title: Some("Background".to_string()),
+            resizable: Some(false),
+            window_background: Some("blurred".to_string()),
+            min_width: Some(320.0),
+            min_height: Some(240.0),
+            focus: Some(false),
+            ..WindowOptions::default()
+        });
+        let titlebar = gpui_options.titlebar.expect("titlebar options");
+        assert_eq!(titlebar.title.as_deref(), Some("Background"));
+        assert!(!gpui_options.is_resizable);
+        assert_eq!(
+            gpui_options.window_background,
+            gpui::WindowBackgroundAppearance::Blurred
+        );
+        assert_eq!(
+            gpui_options.window_min_size,
+            Some(gpui::size(gpui::px(320.0), gpui::px(240.0)))
+        );
     }
 }

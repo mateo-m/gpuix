@@ -15,3 +15,5 @@ render(<ChatApp includeSafeMdx />, {
   height: 820,
   debugFrameOverlay: 'full',
 })
+
+document.getElementById('gpuix-loader')?.remove()
