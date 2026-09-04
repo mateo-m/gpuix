@@ -81,22 +81,31 @@ impl CustomElement for ImgElement {
         use gpui::prelude::*;
 
         if self.src.trim().is_empty() {
-            let mut fallback = gpui::div()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(gpui::rgba(0x1f2230ff))
-                .border(gpui::px(1.0))
-                .border_color(gpui::rgba(0x5d6481ff))
-                .text_color(gpui::rgba(0xa4accdff))
-                .child("img: no src");
-
-            fallback = ctx.styled(fallback);
-
-            return fallback.into_any_element();
+            let fallback = super::custom_surface(
+                gpui::div()
+                    .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)))
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(gpui::rgba(0x1f2230ff))
+                    .border(gpui::px(1.0))
+                    .border_color(gpui::rgba(0x5d6481ff))
+                    .text_color(gpui::rgba(0xa4accdff)),
+                &ctx,
+            );
+            // `chrome_text`, not a raw string: a raw child is invisible to
+            // `getPaintedText()`, so this state could only be tested by
+            // screenshot.
+            return fallback
+                .child(ctx.chrome_text("img: no src", None))
+                .into_any_element();
         }
 
         let src_path = std::path::PathBuf::from(self.src.clone());
+        // The id is what makes gpui's `ImgState` persist. Without it `Img` has no
+        // `GlobalElementId`, so the animated-GIF frame index and the delayed
+        // loading state are rebuilt from scratch on every frame and an animation
+        // never advances past frame zero.
         let mut el = gpui::img(src_path)
             .object_fit(self.object_fit.as_gpui())
             .with_fallback(|| {
@@ -110,11 +119,13 @@ impl CustomElement for ImgElement {
                     .text_color(gpui::rgba(0xa4accdff))
                     .child("img: load failed")
                     .into_any_element()
-            });
+            })
+            .id(gpui::SharedString::from(format!("__gpuix_img_{}", ctx.id)));
 
-        el = ctx.styled(el);
+        el = ctx.styled_interactive(el);
 
-        el.into_any_element()
+        let el = super::wire_standard_events(el, &ctx);
+        crate::automation::track_own_bounds(el, ctx.id).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
@@ -135,7 +146,7 @@ impl CustomElement for ImgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[]
+        &["click", "mouseEnter", "mouseLeave"]
     }
 
     fn destroy(&mut self) {}
@@ -204,9 +215,9 @@ impl CustomElement for SvgElement {
         } else {
             Some(self.source.as_bytes())
         };
+        let element_id = gpui::SharedString::from(format!("__gpuix_svg_{}", ctx.id));
         let Some(bytes) = bytes else {
-            let mut empty = gpui::div();
-            empty = ctx.styled(empty);
+            let empty = super::custom_surface(gpui::div().id(element_id), &ctx);
             return empty.into_any_element();
         };
 
@@ -215,9 +226,14 @@ impl CustomElement for SvgElement {
             .and_then(|style| style.color.as_deref())
             .and_then(crate::color::parse_color_rgba)
             .unwrap_or_else(|| gpui::rgb(0xe2e2e2).into());
-        let mut icon = gpui::svg().data(bytes).flex_none().text_color(tint);
-        icon = ctx.styled(icon);
-        icon.into_any_element()
+        let mut icon = gpui::svg()
+            .data(bytes)
+            .flex_none()
+            .text_color(tint)
+            .id(element_id);
+        icon = ctx.styled_interactive(icon);
+        let icon = super::wire_standard_events(icon, &ctx);
+        crate::automation::track_own_bounds(icon, ctx.id).into_any_element()
     }
 
     fn set_prop(&mut self, key: &str, value: serde_json::Value) {
@@ -233,7 +249,7 @@ impl CustomElement for SvgElement {
     }
 
     fn supported_events(&self) -> &'static [&'static str] {
-        &[]
+        &["click", "mouseEnter", "mouseLeave"]
     }
 
     fn destroy(&mut self) {}

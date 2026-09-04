@@ -4,7 +4,8 @@
   "sideEffects": false,
   "type": "module",
   "scripts": {
-    "build": "vite build",
+    "build": "bun run build:chat && tsc && vite build",
+    "build:chat": "bun ../scripts/web.ts --production --rebuild",
     "deploy:prod": "bun run build && wrangler deploy",
     "dev": "tuistory -- vite dev",
     "start": "vite preview",

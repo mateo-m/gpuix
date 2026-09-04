@@ -1,0 +1,62 @@
+{
+  "name": "@gpuix/cli",
+  "version": "0.1.1",
+  "description": "Create a GPUIX app from the official example template",
+  "license": "Apache-2.0",
+  "type": "module",
+  "main": "./dist/cli.js",
+  "types": "./dist/cli.d.ts",
+  "bin": {
+    "gpuix": "./dist/cli.js"
+  },
+  "exports": {
+    "./package.json": "./package.json",
+    ".": {
+      "types": "./dist/cli.d.ts",
+      "default": "./dist/cli.js"
+    },
+    "./src": {
+      "types": "./src/cli.ts",
+      "default": "./src/cli.ts"
+    },
+    "./src/*": {
+      "types": "./src/*.ts",
+      "default": "./src/*.ts"
+    }
+  },
+  "files": [
+    "src",
+    "dist"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/remorses/gpuix",
+    "directory": "cli"
+  },
+  "homepage": "https://github.com/remorses/gpuix#quickstart",
+  "bugs": "https://github.com/remorses/gpuix/issues",
+  "keywords": [
+    "gpui",
+    "gpuix",
+    "react",
+    "desktop",
+    "scaffold"
+  ],
+  "publishConfig": {
+    "registry": "https://registry.npmjs.org/",
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc && chmod +x dist/cli.js",
+    "test": "vitest run src",
+    "prepublishOnly": "node -e \"if (!process.env.CI) { console.error('Never publish @gpuix/cli locally. CI is the only release path. See AGENTS.md.'); process.exit(1) }\" && rimraf dist \"*.tsbuildinfo\" && bun run build"
+  },
+  "dependencies": {
+    "goke": "^6.14.1",
+    "jszip": "^3.10.1"
+  },
+  "devDependencies": {
+    "@types/node": "^25.3.3",
+    "rimraf": "^6.0.1"
+  }
+}

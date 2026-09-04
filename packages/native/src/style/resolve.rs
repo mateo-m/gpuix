@@ -373,6 +373,27 @@ fn background_fill(style: &StyleDesc, scope: &Scope) -> Option<gpuix_css::backgr
         .and_then(|text| scope.fill(text))
 }
 
+/// Base styles plus gpui's `hover` and `active` refinements.
+///
+/// Every stateful GPUI root must go through this, never `apply_styles` alone.
+/// `StyleDesc` carries `hover` and `active` for every element type, so a custom
+/// element that only applied the base styles accepted the prop, serialized it,
+/// and dropped it. gpui reads both refinements from the element state behind the
+/// element's `ElementId`, so the caller must have called `.id(..)` first.
+pub(crate) fn apply_interactive_styles<E>(mut el: E, style: &StyleDesc, scope: &Scope) -> E
+where
+    E: gpui::Styled + gpui::StatefulInteractiveElement,
+{
+    el = apply_styles(el, style, scope);
+    if let Some(hover_style) = style.hover.as_deref() {
+        el = el.hover(|refinement| apply_styles(refinement, hover_style, scope));
+    }
+    if let Some(active_style) = style.active.as_deref() {
+        el = el.active(|refinement| apply_styles(refinement, active_style, scope));
+    }
+    el
+}
+
 pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope: &Scope) -> E {
     // `visibility` reached StyleDesc but nothing read it, so `hideInstance`
     // hid nothing. GPUI's Visibility::Hidden has the CSS meaning: skip the
@@ -651,12 +672,12 @@ pub(crate) fn apply_styles<E: gpui::Styled>(mut el: E, style: &StyleDesc, scope:
         el = el.cursor(cursor);
     }
     // Overflow: hidden is on the Styled trait, so we handle it here.
-    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_div().
+    // overflow: "scroll" requires StatefulInteractiveElement — handled in build_host_container().
     // CSS precedence: axis-specific (overflowX/Y) overrides the shorthand (overflow).
     {
         let resolved_x = style.overflow_x.as_deref().or(style.overflow.as_deref());
         let resolved_y = style.overflow_y.as_deref().or(style.overflow.as_deref());
-        // Only apply hidden here — scroll is handled in build_div.
+        // Only apply hidden here — scroll is handled in build_host_container.
         if resolved_x == Some("hidden") && resolved_y == Some("hidden") {
             el = el.overflow_hidden();
         } else if resolved_x == Some("hidden") {
