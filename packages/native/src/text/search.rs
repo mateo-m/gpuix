@@ -321,7 +321,11 @@ fn wash(
     let active = spec.active_index == Some(ordinal);
     Wash {
         range,
-        color: if active { spec.active_color } else { spec.color },
+        color: if active {
+            spec.active_color
+        } else {
+            spec.color
+        },
         radius: spec.radius,
         active,
     }
@@ -553,11 +557,7 @@ fn collect_into(tree: &RetainedTree, id: u64, is_root: bool, out: &mut Vec<Group
     flush(&mut pending, &mut pending_text, out);
 }
 
-fn flush(
-    parts: &mut Vec<(Arc<str>, Range<usize>)>,
-    text: &mut String,
-    out: &mut Vec<Group>,
-) {
+fn flush(parts: &mut Vec<(Arc<str>, Range<usize>)>, text: &mut String, out: &mut Vec<Group>) {
     if parts.is_empty() {
         return;
     }
@@ -887,7 +887,11 @@ mod tests {
     #[test]
     fn a_nested_declaration_is_skipped_by_the_ancestor() {
         let mut tree = interpolated_tree();
-        tree.set_custom_prop(2, "highlight".to_string(), serde_json::json!({"query": "x"}));
+        tree.set_custom_prop(
+            2,
+            "highlight".to_string(),
+            serde_json::json!({"query": "x"}),
+        );
         let groups = GroupList::collect(&tree, 1);
         assert!(groups.groups.is_empty(), "nearest declaration must win");
         // The nested element still resolves its own subtree.
@@ -935,7 +939,11 @@ mod tests {
         let groups = GroupList::collect(&tree, 1);
         assert_eq!(groups.groups.len(), 2);
         assert_eq!(group_id(&tree, 2), Some(2));
-        assert_eq!(group_id(&tree, 4), Some(4), "the run restarts after the div");
+        assert_eq!(
+            group_id(&tree, 4),
+            Some(4),
+            "the run restarts after the div"
+        );
     }
 
     #[test]
@@ -969,7 +977,13 @@ mod tests {
         let groups = GroupList::collect(&tree, 1);
         assert_eq!(groups.groups.len(), 1);
         assert_eq!(
-            resolve(&groups, &HighlightSet { specs: vec![spec("fox")] }).total,
+            resolve(
+                &groups,
+                &HighlightSet {
+                    specs: vec![spec("fox")]
+                }
+            )
+            .total,
             1
         );
     }
@@ -1030,7 +1044,10 @@ mod tests {
         // The native element paints first, so it must own ordinal 0.
         let painted_native = washes_for_native_run(&ctx, &native, "l");
         let painted_text = washes_for_retained_run(&ctx, &"3:0".into());
-        assert!(painted_native[0].active, "the first painted match is active");
+        assert!(
+            painted_native[0].active,
+            "the first painted match is active"
+        );
         assert!(painted_text.iter().all(|wash| !wash.active));
 
         // Reverse the paint order and the ownership moves with it.
@@ -1063,7 +1080,10 @@ mod tests {
         let second = washes_for_retained_run(&ctx, &"3:0".into());
         assert_eq!(first.len(), 1);
         assert_eq!(second.len(), 1);
-        assert!(first[0].active && second[0].active, "one match, one ordinal");
+        assert!(
+            first[0].active && second[0].active,
+            "one match, one ordinal"
+        );
     }
 
     /// A virtualized subtree holds a window of the document, so the app says
@@ -1157,7 +1177,12 @@ mod tests {
     #[test]
     fn identity_ignores_the_find_cursor_but_not_the_query() {
         let groups = GroupList::collect(&interpolated_tree(), 1);
-        let plain = resolve(&groups, &HighlightSet { specs: vec![spec("l")] });
+        let plain = resolve(
+            &groups,
+            &HighlightSet {
+                specs: vec![spec("l")],
+            },
+        );
         let mut moved = spec("l");
         moved.active_index = Some(1);
         moved.color = gpui::rgba(0x00ff00ff).into();
@@ -1168,8 +1193,18 @@ mod tests {
     #[test]
     fn identity_changes_when_a_query_swaps_at_the_same_count() {
         let groups = GroupList::collect(&interpolated_tree(), 1);
-        let a = resolve(&groups, &HighlightSet { specs: vec![spec("Hello")] });
-        let b = resolve(&groups, &HighlightSet { specs: vec![spec("Tommy")] });
+        let a = resolve(
+            &groups,
+            &HighlightSet {
+                specs: vec![spec("Hello")],
+            },
+        );
+        let b = resolve(
+            &groups,
+            &HighlightSet {
+                specs: vec![spec("Tommy")],
+            },
+        );
         assert_eq!(a.total, b.total);
         assert_ne!(a.identity(), b.identity());
     }
@@ -1181,7 +1216,9 @@ mod tests {
         b.active_index = Some(3);
         b.color = gpui::rgba(0x0000ffff).into();
         b.radius = 9.0;
-        let set_a = HighlightSet { specs: vec![a.clone()] };
+        let set_a = HighlightSet {
+            specs: vec![a.clone()],
+        };
         let set_b = HighlightSet { specs: vec![b] };
         assert_eq!(set_a.matcher_hash(), set_b.matcher_hash());
         a.whole_word = true;

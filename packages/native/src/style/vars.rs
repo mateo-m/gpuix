@@ -20,6 +20,7 @@ use gpuix_css::color::{ColorContext, Rgba};
 use gpuix_css::length::Length;
 
 use crate::inheritance::Variables;
+use crate::style::LinearGradientValue;
 
 /// How deep one `var()` may reach through other variables.
 ///
@@ -153,6 +154,40 @@ impl<'a> Scope<'a> {
             self.used.set(true);
         }
         Some(reading.fill)
+    }
+
+    /// The object form of `background`, painted in the colour space it asks
+    /// for. A stop colour goes through `color`, so `var()` and `currentColor`
+    /// work there too.
+    pub fn gradient(&self, gradient: &LinearGradientValue) -> Option<gpui::Background> {
+        let angle = gradient.angle as f32;
+        if !angle.is_finite() || gradient.stops.is_empty() {
+            return None;
+        }
+        let color_space = match gradient.color_space.as_deref() {
+            None | Some("srgb") => gpui::ColorSpace::Srgb,
+            Some("oklab") => gpui::ColorSpace::Oklab,
+            Some(_) => return None,
+        };
+        let stops = gradient
+            .stops
+            .iter()
+            .map(|stop| {
+                let position = stop.position as f32;
+                if !(0.0..=1.0).contains(&position) {
+                    return None;
+                }
+                Some(gpui::LinearColorStop {
+                    color: crate::color::to_hsla(self.color(&stop.color)?),
+                    percentage: position,
+                    hint: 0.0,
+                })
+            })
+            .collect::<Option<Vec<_>>>()?;
+        Some(
+            gpui::linear_gradient_stops(gpui::GradientLine::Angle(angle), &stops)
+                .color_space(color_space),
+        )
     }
 
     /// Whether resolving read a variable.
