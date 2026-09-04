@@ -895,5 +895,11 @@ const isEntryPoint =
     : process.argv[1]?.endsWith("diff.tsx") || process.argv[1]?.endsWith("diff.js")
 
 if (isEntryPoint) {
-  render(<App />, { title: "GPUIX Diff Viewer", width: 900, height: 600 })
+  render(<App />, {
+    title: "GPUIX Diff Viewer",
+    width: 900,
+    height: 600,
+    // Agent checks need real GPU paint, not control of the user's keyboard.
+    focus: process.env.GPUIX_BACKGROUND !== "1",
+  })
 }

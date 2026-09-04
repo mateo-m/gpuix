@@ -18,7 +18,12 @@ import { launch } from '@gpuix/react/automation'
 const out = process.argv[2] ?? 'screenshots/todo.png'
 mkdirSync(path.dirname(out), { recursive: true })
 
-const app = await launch({ command: 'bun', args: ['app.tsx'] })
+const app = await launch({
+  command: 'bun',
+  args: ['app.tsx'],
+  // Live automation needs the real window, but never needs to interrupt the user.
+  env: { GPUIX_BACKGROUND: '1' },
+})
 await app.getByTestId('composer').waitFor({ timeoutMs: 60_000 })
 await app.clock.pause()
 await app.screenshot({ path: out })

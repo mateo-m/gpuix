@@ -5,7 +5,6 @@
 /// of the full element tree. Only changed elements cross the FFI boundary.
 
 import { createContext } from "react"
-import type { ReactContext } from "react-reconciler"
 import { DefaultEventPriority } from "react-reconciler/constants.js"
 
 const NoEventPriority = 0
@@ -14,7 +13,7 @@ import type {
   ElementType,
   HostContext,
   Instance,
-  NativeRenderer,
+  MutationRenderer,
   Props,
   PublicInstance,
   StyleDesc,
@@ -51,7 +50,7 @@ function containerFor(node: HostNode): Container {
   return stateFor(node).container
 }
 
-function rendererFor(node: HostNode): NativeRenderer {
+function rendererFor(node: HostNode): MutationRenderer {
   return containerFor(node).renderer
 }
 
@@ -195,7 +194,7 @@ function serializeCustomProp(
 
 /** Send all custom props to Rust for non-built-in element types. */
 function syncCustomProps(
-  renderer: NativeRenderer,
+  renderer: MutationRenderer,
   id: number,
   type: string,
   props: Props
@@ -210,7 +209,7 @@ function syncCustomProps(
 
 /** Diff and send changed custom props to Rust. */
 function diffCustomProps(
-  renderer: NativeRenderer,
+  renderer: MutationRenderer,
   id: number,
   type: string,
   oldProps: Props,
@@ -233,7 +232,7 @@ function diffCustomProps(
     if (isReservedProp(key)) continue
     if (builtIn && !UNIVERSAL_PROPS.has(key)) continue
     if (!newKeys.includes(key)) {
-      renderer.setCustomProp(id, key, JSON.stringify(null))
+      renderer.setCustomProp(id, key, null)
     }
   }
 }
@@ -337,11 +336,11 @@ export const hostConfig = {
     return null
   },
 
-  // Batch flush point: commitMutations() sends all queued mutations to Rust
+  // Batch flush point: flushMutations() sends all queued mutations to Rust
   // in a single applyBatch() FFI call. This is the end of React's synchronous
   // commit phase — all mutations from this render are flushed together.
   resetAfterCommit(containerInfo: Container): void {
-    containerInfo.renderer.commitMutations()
+    containerInfo.renderer.flushMutations()
   },
 
   getRootHostContext(_rootContainerInstance: Container): HostContext {
@@ -485,7 +484,7 @@ export const hostConfig = {
   },
 
   NotPendingTransition: null,
-  HostTransitionContext: createContext(null) as unknown as ReactContext<null>,
+  HostTransitionContext: createContext(null),
   resetFormInstance(): void {},
   requestPostPaintCallback(): void {},
   trackSchedulerEvent(): void {},

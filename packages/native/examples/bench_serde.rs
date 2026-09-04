@@ -212,9 +212,7 @@ impl CompactStyle {
     fn dedup_key(&self) -> Vec<u64> {
         self.props
             .iter()
-            .map(|p| {
-                (p.key as u64) << 48 | (p.kind as u64) << 40 | p.bits as u64
-            })
+            .map(|p| (p.key as u64) << 48 | (p.kind as u64) << 40 | p.bits as u64)
             .collect()
     }
 }
@@ -237,7 +235,10 @@ impl<'de> Deserialize<'de> for PropValue {
             }
 
             fn visit_f64<E: de::Error>(self, v: f64) -> Result<PropValue, E> {
-                Ok(PropValue { kind: KIND_F32, bits: (v as f32).to_bits() })
+                Ok(PropValue {
+                    kind: KIND_F32,
+                    bits: (v as f32).to_bits(),
+                })
             }
             fn visit_i64<E: de::Error>(self, v: i64) -> Result<PropValue, E> {
                 self.visit_f64(v as f64)
@@ -246,10 +247,16 @@ impl<'de> Deserialize<'de> for PropValue {
                 self.visit_f64(v as f64)
             }
             fn visit_bool<E: de::Error>(self, v: bool) -> Result<PropValue, E> {
-                Ok(PropValue { kind: KIND_BOOL, bits: v as u32 })
+                Ok(PropValue {
+                    kind: KIND_BOOL,
+                    bits: v as u32,
+                })
             }
             fn visit_unit<E: de::Error>(self) -> Result<PropValue, E> {
-                Ok(PropValue { kind: KIND_KEYWORD, bits: u32::MAX })
+                Ok(PropValue {
+                    kind: KIND_KEYWORD,
+                    bits: u32::MAX,
+                })
             }
             fn visit_none<E: de::Error>(self) -> Result<PropValue, E> {
                 self.visit_unit()
@@ -257,7 +264,10 @@ impl<'de> Deserialize<'de> for PropValue {
 
             fn visit_str<E: de::Error>(self, v: &str) -> Result<PropValue, E> {
                 if v == "auto" {
-                    return Ok(PropValue { kind: KIND_AUTO, bits: 0 });
+                    return Ok(PropValue {
+                        kind: KIND_AUTO,
+                        bits: 0,
+                    });
                 }
                 if let Some(percent) = v.strip_suffix('%') {
                     if let Ok(number) = percent.parse::<f32>() {
@@ -271,10 +281,16 @@ impl<'de> Deserialize<'de> for PropValue {
                 // `StyleDesc`. Parsing at ingest also removes the per-frame
                 // `parse_color` call that paint does today.
                 if let Some(rgba) = parse_color_hex(v) {
-                    return Ok(PropValue { kind: KIND_COLOR, bits: rgba });
+                    return Ok(PropValue {
+                        kind: KIND_COLOR,
+                        bits: rgba,
+                    });
                 }
                 let id = STRINGS.with(|s| s.borrow_mut().intern(v));
-                Ok(PropValue { kind: KIND_KEYWORD, bits: id })
+                Ok(PropValue {
+                    kind: KIND_KEYWORD,
+                    bits: id,
+                })
             }
 
             /// `hover`, `active` and `boxShadow` are nested objects. They land in
@@ -286,7 +302,10 @@ impl<'de> Deserialize<'de> for PropValue {
                     arena.push(nested);
                     (arena.len() - 1) as u32
                 });
-                Ok(PropValue { kind: KIND_NESTED, bits: id })
+                Ok(PropValue {
+                    kind: KIND_NESTED,
+                    bits: id,
+                })
             }
         }
 
@@ -311,10 +330,17 @@ impl<'de> Visitor<'de> for CompactStyleVisitor {
         while let Some(key) = map.next_key::<&str>()? {
             let id = KEYS.with(|k| k.borrow_mut().intern(key)) as u16;
             let value: PropValue = map.next_value()?;
-            props.push(StyleProp { key: id, kind: value.kind, _pad: 0, bits: value.bits });
+            props.push(StyleProp {
+                key: id,
+                kind: value.kind,
+                _pad: 0,
+                bits: value.bits,
+            });
         }
         props.sort_unstable_by_key(|p| p.key);
-        Ok(CompactStyle { props: props.into_boxed_slice() })
+        Ok(CompactStyle {
+            props: props.into_boxed_slice(),
+        })
     }
 }
 
@@ -390,18 +416,51 @@ impl<'de> Deserialize<'de> for Str<'de> {
 
 #[allow(dead_code)]
 enum Op<'a, S> {
-    CreateElement { id: u64, kind: Str<'a> },
-    DestroyElement { id: u64 },
-    AppendChild { parent: u64, child: u64 },
-    RemoveChild { parent: u64, child: u64 },
-    InsertBefore { parent: u64, child: u64, before: u64 },
-    SetStyle { id: u64, style: S },
-    SetText { id: u64, content: Str<'a> },
-    SetEvent { id: u64, event: Str<'a>, has_handler: bool },
-    SetRoot { id: u64 },
-    SetCustomProp { id: u64, key: Str<'a>, value: serde_json::Value },
-    DefineStyle { style_id: u32, style: S },
-    SetStyleRef { id: u64, style_id: u32 },
+    CreateElement {
+        id: u64,
+        kind: Str<'a>,
+    },
+    DestroyElement {
+        id: u64,
+    },
+    AppendChild {
+        parent: u64,
+        child: u64,
+    },
+    InsertBefore {
+        parent: u64,
+        child: u64,
+        before: u64,
+    },
+    SetStyle {
+        id: u64,
+        style: S,
+    },
+    SetText {
+        id: u64,
+        content: Str<'a>,
+    },
+    SetEvent {
+        id: u64,
+        event: Str<'a>,
+        has_handler: bool,
+    },
+    SetRoot {
+        id: u64,
+    },
+    SetCustomProp {
+        id: u64,
+        key: Str<'a>,
+        value: serde_json::Value,
+    },
+    DefineStyle {
+        style_id: u32,
+        style: S,
+    },
+    SetStyleRef {
+        id: u64,
+        style_id: u32,
+    },
     Strings,
     Unknown,
 }
@@ -427,30 +486,51 @@ impl<'de, S: Deserialize<'de>> Visitor<'de> for OpVisitor<S> {
     fn visit_seq<A: SeqAccess<'de>>(self, mut seq: A) -> Result<Op<'de, S>, A::Error> {
         let name: Str<'de> = next(&mut seq)?;
         let op = match name.as_str() {
-            "createElement" => Op::CreateElement { id: next(&mut seq)?, kind: next(&mut seq)? },
-            "destroyElement" => Op::DestroyElement { id: next(&mut seq)? },
-            "appendChild" => Op::AppendChild { parent: next(&mut seq)?, child: next(&mut seq)? },
-            "removeChild" => Op::RemoveChild { parent: next(&mut seq)?, child: next(&mut seq)? },
+            "createElement" => Op::CreateElement {
+                id: next(&mut seq)?,
+                kind: next(&mut seq)?,
+            },
+            "destroyElement" => Op::DestroyElement {
+                id: next(&mut seq)?,
+            },
+            "appendChild" => Op::AppendChild {
+                parent: next(&mut seq)?,
+                child: next(&mut seq)?,
+            },
             "insertBefore" => Op::InsertBefore {
                 parent: next(&mut seq)?,
                 child: next(&mut seq)?,
                 before: next(&mut seq)?,
             },
-            "setStyle" => Op::SetStyle { id: next(&mut seq)?, style: next(&mut seq)? },
-            "setText" => Op::SetText { id: next(&mut seq)?, content: next(&mut seq)? },
+            "setStyle" => Op::SetStyle {
+                id: next(&mut seq)?,
+                style: next(&mut seq)?,
+            },
+            "setText" => Op::SetText {
+                id: next(&mut seq)?,
+                content: next(&mut seq)?,
+            },
             "setEventListener" => Op::SetEvent {
                 id: next(&mut seq)?,
                 event: next(&mut seq)?,
                 has_handler: next(&mut seq)?,
             },
-            "setRoot" => Op::SetRoot { id: next(&mut seq)? },
-            "setCustomPropValue" | "setCustomProp" => Op::SetCustomProp {
+            "setRoot" => Op::SetRoot {
+                id: next(&mut seq)?,
+            },
+            "setCustomProp" => Op::SetCustomProp {
                 id: next(&mut seq)?,
                 key: next(&mut seq)?,
                 value: next(&mut seq)?,
             },
-            "defineStyle" => Op::DefineStyle { style_id: next(&mut seq)?, style: next(&mut seq)? },
-            "setStyleRef" => Op::SetStyleRef { id: next(&mut seq)?, style_id: next(&mut seq)? },
+            "defineStyle" => Op::DefineStyle {
+                style_id: next(&mut seq)?,
+                style: next(&mut seq)?,
+            },
+            "setStyleRef" => Op::SetStyleRef {
+                id: next(&mut seq)?,
+                style_id: next(&mut seq)?,
+            },
             "strings" => {
                 let _table: Vec<Str<'de>> = next(&mut seq)?;
                 Op::Strings
@@ -541,7 +621,8 @@ impl CompactTree {
     fn slot(&mut self, id: u64) -> &mut CompactElement {
         let index = id as usize;
         if index >= self.elements.len() {
-            self.elements.resize(index + 1, CompactElement::new(u16::MAX));
+            self.elements
+                .resize(index + 1, CompactElement::new(u16::MAX));
         }
         &mut self.elements[index]
     }
@@ -605,7 +686,10 @@ fn verify(fat: &RetainedTree, compact: &CompactTree) {
     let mut checked = 0usize;
     for (id, element) in &fat.elements {
         let index = *id as usize;
-        assert!(index < compact.elements.len(), "compact tree is missing {id}");
+        assert!(
+            index < compact.elements.len(),
+            "compact tree is missing {id}"
+        );
         let slot = &compact.elements[index];
         assert_ne!(slot.kind, u16::MAX, "element {id} was never created");
         assert_eq!(
@@ -634,7 +718,14 @@ fn verify(fat: &RetainedTree, compact: &CompactTree) {
         );
         checked += 1;
     }
-    assert_eq!(checked, compact.elements.iter().filter(|e| e.kind != u16::MAX).count());
+    assert_eq!(
+        checked,
+        compact
+            .elements
+            .iter()
+            .filter(|e| e.kind != u16::MAX)
+            .count()
+    );
     println!("verified {checked} elements match between both trees\n");
 }
 
@@ -755,7 +846,9 @@ fn build_pointer_style_tree<P: Clone + From<StyleDesc>>(
     let mut revision = 0u64;
     for op in &ops {
         let Some(array) = op.as_array() else { continue };
-        let Some(name) = array.first().and_then(|v| v.as_str()) else { continue };
+        let Some(name) = array.first().and_then(|v| v.as_str()) else {
+            continue;
+        };
         let id = |index: usize| array.get(index).and_then(|v| v.as_u64()).unwrap_or(0);
         match name {
             "createElement" => {
@@ -804,10 +897,12 @@ fn build_pointer_style_tree<P: Clone + From<StyleDesc>>(
             }
             "setEventListener" => {
                 if let Some(element) = tree.get_mut(&id(1)) {
-                    element.events.insert(array[2].as_str().unwrap_or_default().to_owned());
+                    element
+                        .events
+                        .insert(array[2].as_str().unwrap_or_default().to_owned());
                 }
             }
-            "setCustomPropValue" | "setCustomProp" => {
+            "setCustomProp" => {
                 if let Some(element) = tree.get_mut(&id(1)) {
                     element.custom_props.insert(
                         array[2].as_str().unwrap_or_default().to_owned(),
@@ -834,7 +929,11 @@ fn build_compact_tree(bytes: &[u8]) -> CompactTree {
                 let index = (tree.contents.len() - 1) as u32;
                 tree.slot(id).content = index;
             }
-            Op::SetEvent { id, event, has_handler } => {
+            Op::SetEvent {
+                id,
+                event,
+                has_handler,
+            } => {
                 let bit = KEYS.with(|k| k.borrow_mut().intern(event.as_str())) % 32;
                 let slot = tree.slot(id);
                 if has_handler {
@@ -1016,15 +1115,23 @@ fn main() {
         // The shipped path, end to end, minus only the napi String copy:
         // `serde_json` to `Vec<Value>`, then `parse_batch_ops`, then the apply
         // loop. Everything below it is a proposal; this row is production.
-        time("REAL apply_batch_to_tree (parse + apply)", iterations, || {
-            let mut tree = RetainedTree::new();
-            gpuix_native::apply_batch_to_tree(&mut tree, json.as_bytes()).expect("apply");
-            tree.elements.len()
+        time(
+            "REAL apply_batch_to_tree (parse + apply)",
+            iterations,
+            || {
+                let mut tree = RetainedTree::new();
+                gpuix_native::apply_batch_to_tree(&mut tree, json.as_bytes()).expect("apply");
+                tree.elements.len()
+            },
+        ),
+        time(
+            "the old path — Vec<Value> + clone + from_value",
+            iterations,
+            || decode_old_path(&json),
+        ),
+        time("Vec<Value>, no clone", iterations, || {
+            decode_no_clone(&json)
         }),
-        time("the old path — Vec<Value> + clone + from_value", iterations, || {
-            decode_old_path(&json)
-        }),
-        time("Vec<Value>, no clone", iterations, || decode_no_clone(&json)),
         time("typed JSON ► StyleDesc", iterations, || {
             decode_typed_json::<StyleDesc>(json.as_bytes())
         }),
@@ -1086,7 +1193,11 @@ fn main() {
     let compact_heap = heap_since(compact_start);
     verify(&fat, &compact);
     drop(fat);
-    let compact_elements = compact.elements.iter().filter(|e| e.kind != u16::MAX).count();
+    let compact_elements = compact
+        .elements
+        .iter()
+        .filter(|e| e.kind != u16::MAX)
+        .count();
     let unique_styles = compact.styles.len();
     let structural = compact.heap_bytes();
     let tables = interner_bytes();

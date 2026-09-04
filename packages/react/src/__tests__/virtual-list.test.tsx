@@ -554,4 +554,35 @@ describe("<virtual-list>", () => {
     expect(rowOffset?.[0], `row ${JSON.stringify(rowOffset)}`).toBeLessThan(0)
   })
 
+  it("scrolls and keeps selecting when the anchor row unmounts", () => {
+    const { render, renderer } = createTestRoot()
+    render(
+      <virtual-list
+        overdraw={0}
+        estimatedItemHeight={40}
+        style={{ width: 400, height: 160 }}
+      >
+        <Rows count={30} />
+      </virtual-list>,
+    )
+    const list = renderer.findByType("virtual-list")[0]
+
+    renderer.nativeSimulateMouseDown(1, 20)
+    renderer.nativeSimulateMouseMove(1, 158, 0)
+    for (let tick = 0; tick < 8; tick += 1) {
+      renderer.advanceTime(24)
+    }
+
+    const selected = renderer.getSelectedText()
+    expect(renderer.getScrollOffset(list.id)?.[1]).toBeLessThan(-40)
+    expect(selected).toContain("row-0")
+    expect(selected).toMatch(/row-[5-9]/)
+
+    renderer.nativeSimulateMouseUp(1, 158)
+    const stoppedAt = renderer.getScrollOffset(list.id)?.[1]
+    renderer.advanceTime(48)
+    expect(renderer.getScrollOffset(list.id)?.[1]).toBe(stoppedAt)
+    expect(renderer.getSelectedText()).toBe(selected)
+  })
+
 })

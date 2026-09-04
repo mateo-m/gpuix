@@ -12,6 +12,7 @@
 /// All napi calls happen on the JS main thread.
 use std::cell::RefCell;
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use napi::bindgen_prelude::*;
 use napi_derive::napi;
@@ -145,9 +146,7 @@ fn u32_to_mouse_button(button: u32) -> gpui::MouseButton {
 ///
 /// Usage from JS:
 ///   const r = new TestGpuixRenderer()
-///   r.createElement(1, "div")
-///   r.setRoot(1)
-///   r.commitMutations()
+///   r.applyBatch('[["createElement",1,"div"],["setRoot",1]]')
 ///   r.flush()                  // triggers GpuixView::render() on the GPU
 ///   r.simulateClick(50, 50)    // dispatches through GPUI hit testing
 ///   const events = r.drainEvents()
@@ -186,7 +185,6 @@ impl TestGpuixRenderer {
         let platform = gpui_platform::current_platform(false);
         let mut cx = gpui::VisualTestAppContext::new(platform);
         cx.update(|cx| {
-            crate::renderer::init_key_bindings(cx);
             crate::custom_elements::input::init(cx);
         });
 
@@ -225,24 +223,6 @@ impl TestGpuixRenderer {
         })
     }
 
-    // ── Mutation API (same interface as GpuixRenderer) ────────────────
-
-    #[napi]
-    pub fn create_element(&self, id: f64, element_type: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().create_element(id, element_type);
-        Ok(())
-    }
-
-    /// Destroy an element and all descendants. Returns destroyed IDs
-    /// so JS can clean up event handlers.
-    #[napi]
-    pub fn destroy_element(&self, id: f64) -> Result<Vec<f64>> {
-        let id = to_element_id(id)?;
-        let destroyed = self.tree.lock().unwrap().destroy_element(id);
-        Ok(destroyed.iter().map(|&id| id as f64).collect())
-    }
-
     /// How many elements the retained tree holds, reachable from the root or
     /// not. `getTreeJson` walks from the root, so it cannot see a node that was
     /// detached and never destroyed. This is the only way a test can prove a
@@ -250,96 +230,6 @@ impl TestGpuixRenderer {
     #[napi]
     pub fn get_retained_element_count(&self) -> u32 {
         self.tree.lock().unwrap().elements.len() as u32
-    }
-
-    #[napi]
-    pub fn append_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().append_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn remove_child(&self, parent_id: f64, child_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        self.tree.lock().unwrap().remove_child(parent_id, child_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn insert_before(&self, parent_id: f64, child_id: f64, before_id: f64) -> Result<()> {
-        let parent_id = to_element_id(parent_id)?;
-        let child_id = to_element_id(child_id)?;
-        let before_id = to_element_id(before_id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .insert_before(parent_id, child_id, before_id);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_style(&self, id: f64, style_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_style_json(id, style_json.as_bytes())
-            .map_err(|error| Error::from_reason(format!("Failed to parse style: {error}")))
-    }
-
-    #[napi]
-    pub fn set_text(&self, id: f64, content: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().set_text(id, content);
-        Ok(())
-    }
-
-    #[napi]
-    pub fn set_event_listener(&self, id: f64, event_type: String, has_handler: bool) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree
-            .lock()
-            .unwrap()
-            .set_event_listener(id, event_type, has_handler);
-        Ok(())
-    }
-
-    /// Set the root element (called from appendChildToContainer).
-    #[napi]
-    pub fn set_root(&self, id: f64) -> Result<()> {
-        let id = to_element_id(id)?;
-        self.tree.lock().unwrap().root_id = Some(id);
-        Ok(())
-    }
-
-    /// Set a custom prop on an element (for non-div/text elements like input, editor, diff).
-    #[napi]
-    pub fn set_custom_prop(&self, id: f64, key: String, value_json: String) -> Result<()> {
-        let id = to_element_id(id)?;
-        let value: serde_json::Value = serde_json::from_str(&value_json)
-            .map_err(|e| Error::from_reason(format!("Failed to parse custom prop value: {}", e)))?;
-        self.tree.lock().unwrap().set_custom_prop(id, key, value);
-        Ok(())
-    }
-
-    /// Get a custom prop value from an element.
-    #[napi]
-    pub fn get_custom_prop(&self, id: f64, key: String) -> Result<Option<String>> {
-        let id = to_element_id(id)?;
-        let tree = self.tree.lock().unwrap();
-        Ok(tree
-            .get_custom_prop(id, &key)
-            .map(|v| serde_json::to_string(v).unwrap_or_default()))
-    }
-
-    /// Signal that a batch of mutations is complete.
-    /// In tests, this is a no-op — flush() handles the actual re-render.
-    #[napi]
-    pub fn commit_mutations(&self) -> Result<()> {
-        Ok(())
     }
 
     /// How many styles the renderer has resolved since the last reset.
@@ -576,6 +466,46 @@ impl TestGpuixRenderer {
             })
             .map_err(|e| Error::from_reason(e.to_string()))?;
 
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_next(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.focus_next(app))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn focus_previous(&self) -> Result<()> {
+        with_test_state(|cx, window, _view| {
+            cx.update_window(window, |_, window, app| window.focus_prev(app))
+                .map_err(|error| Error::from_reason(error.to_string()))?;
+            cx.run_until_parked();
+            Ok(())
+        })
+    }
+
+    #[napi]
+    pub fn set_window_key_events(&self, key_down: bool, key_up: bool, event_id: f64) -> Result<()> {
+        let event_id = to_element_id(event_id)?;
+        with_test_state(|cx, window, view| {
+            let view = view.clone();
+            cx.update_window(window, |_, window, app| {
+                view.update(app, |view, cx| {
+                    view.window_key_down = key_down;
+                    view.window_key_up = key_up;
+                    view.window_key_event_id = event_id;
+                    cx.notify();
+                });
+                window.refresh();
+            })
+            .map_err(|error| Error::from_reason(error.to_string()))?;
             cx.run_until_parked();
             Ok(())
         })
@@ -1161,6 +1091,21 @@ impl TestGpuixRenderer {
                 .map_err(|e| Error::from_reason(e.to_string()))?;
             cx.run_until_parked();
             Ok(now_ms)
+        })
+    }
+
+    /// Advance GPUI's deterministic test executor and run due timers.
+    #[napi]
+    pub fn advance_time(&self, milliseconds: f64) -> Result<()> {
+        if !milliseconds.is_finite() || milliseconds < 0.0 {
+            return Err(Error::from_reason(format!(
+                "advanceTime milliseconds must be finite and non-negative, got {milliseconds}"
+            )));
+        }
+        with_test_state(|cx, _window, _view| {
+            cx.advance_clock(Duration::from_secs_f64(milliseconds / 1000.0));
+            cx.run_until_parked();
+            Ok(())
         })
     }
 
