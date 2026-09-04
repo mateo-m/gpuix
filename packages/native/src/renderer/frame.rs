@@ -168,22 +168,13 @@ pub(super) fn build_element(
     let resolved = element.resolved_style(&ctx.cascade);
 
     let built = match element.element_type.as_str() {
-        "div" => {
+        // `<text>` is a `<div>` that happens to carry a string. Giving it its
+        // own builder meant every interaction prop on the shared `Props` type
+        // (onClick, hover, focus, tabIndex) type-checked, registered a JS
+        // listener, and then silently did nothing.
+        "div" | "text" => {
             ctx.custom_registry.destroy(id);
-            build_div(
-                element,
-                style,
-                resolved.clone(),
-                motion.as_ref(),
-                position,
-                ctx,
-                window,
-                cx,
-            )
-        }
-        "text" => {
-            ctx.custom_registry.destroy(id);
-            build_text(
+            build_host_container(
                 element,
                 style,
                 resolved.clone(),
@@ -357,6 +348,15 @@ fn build_virtual_list(
         }
     };
 
+    // Queued scrolls apply here, after `sync` spliced this frame's child
+    // changes, so the indices JS computed against its committed child list are
+    // the indices the splice-adjusted ListState sees.
+    if let Some(offset) =
+        super::PENDING_VIRTUAL_LIST_SCROLLS.with(|cell| cell.borrow_mut().remove(&element.id))
+    {
+        list_state.scroll_to(offset);
+    }
+
     if element.events.contains("visibleRange") {
         let callback = ctx.event_callback.clone();
         let list_id = element.id;
@@ -415,7 +415,12 @@ fn virtual_row_ancestor(tree: &RetainedTree, list_id: u64, element_id: u64) -> O
     }
 }
 
-pub(crate) fn build_div(
+/// The one builder for `<div>` and `<text>`.
+///
+/// Both get the same stable GPUI id, so gpui keeps their interactive element
+/// state (hover, active, pointer capture, scroll, accessibility node) across
+/// frames, and both wire the whole shared `Props` surface.
+pub(crate) fn build_host_container(
     element: &crate::retained_tree::RetainedElement,
     style: Option<&StyleDesc>,
     resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
@@ -427,10 +432,16 @@ pub(crate) fn build_div(
 ) -> gpui::AnyElement {
     use gpui::prelude::*;
 
-    let element_id_str = format!("__gpuix_{}", element.id);
-    let mut el = gpui::div().id(gpui::SharedString::from(element_id_str));
+    // `ElementId::Integer` rather than a formatted name: host ids are already
+    // unique per renderer, and every `<div>` and `<text>` builds one of these on
+    // every frame, so the string allocation was pure overhead. Custom elements
+    // use `ElementId::Name`, which is a different variant and cannot collide.
+    let mut el = gpui::div().id(gpui::ElementId::Integer(element.id));
 
-    el = apply_child_rules(el, position, ctx);
+    // A raw text node is not an element to CSS, so no rule reaches it.
+    if !is_raw_text(element) {
+        el = apply_child_rules(el, position, ctx);
+    }
 
     if let Some(resolved) = resolved.as_ref() {
         el = crate::style::resolve::apply_resolved(el, &resolved.base);
@@ -989,85 +1000,6 @@ fn text_content(
         cursor: text.cursor.filter(|_| !ctx.cascade.cursor_declared()),
         ..text
     })
-}
-
-pub(crate) fn build_text(
-    element: &crate::retained_tree::RetainedElement,
-    style: Option<&StyleDesc>,
-    resolved: Option<std::sync::Arc<crate::style::resolve::Resolved>>,
-    motion: Option<&crate::motion::MotionFrame>,
-    position: Option<(usize, usize)>,
-    ctx: &mut BuildCtx,
-    window: &mut gpui::Window,
-    cx: &mut gpui::Context<GpuixView>,
-) -> gpui::AnyElement {
-    use gpui::prelude::*;
-
-    // Fast path: plain text leaf without style. It still goes through
-    // `text_content` so the glyphs land in the selection registry — the old
-    // raw-string return was the reason text was not selectable.
-    if style.is_none()
-        && motion.is_none()
-        && element.children.is_empty()
-        && ctx.direct_rules.is_empty()
-        && ctx.descendant_rules.is_empty()
-    {
-        let content = element.content.clone().unwrap_or_default();
-        return gpui::div()
-            .relative()
-            .child(crate::automation::bounds_tracker(element.id, None, None))
-            .child(text_content(element, &content, ctx))
-            .into_any_element();
-    }
-
-    // The full style set, exactly as `<div>` gets it. `<text>` used to apply a
-    // text-only subset, so `padding`, `width` and every layout prop on a text
-    // node were silently dropped — a hole with no error and no warning.
-    let mut el = gpui::div();
-    // A raw text node is not an element to CSS, so no rule reaches it.
-    if !is_raw_text(element) {
-        el = apply_child_rules(el, position, ctx);
-    }
-    if let Some(resolved) = resolved.as_ref() {
-        el = crate::style::resolve::apply_resolved(el, &resolved.base);
-        for (state, declared) in &resolved.states {
-            if state.is_index()
-                && position.is_some_and(|(index, count)| state.holds_at(index, count))
-            {
-                el = crate::style::resolve::apply_resolved(el, declared);
-            }
-        }
-    }
-    if let Some(motion) = motion {
-        el = crate::style::resolve::apply_motion(el, motion, style);
-    }
-    if style.and_then(|style| style.position.as_deref()).is_none() {
-        el = el.relative();
-    }
-    el = el.child(crate::automation::bounds_tracker(
-        element.id,
-        selection_start_flag(style),
-        None,
-    ));
-
-    if let Some(ref content) = element.content {
-        el = el.child(text_content(element, content, ctx));
-    }
-
-    let (saved_direct, pushed) = push_child_rules(resolved.as_deref(), ctx);
-    let child_ids: Vec<u64> = element
-        .children
-        .iter()
-        .copied()
-        .filter(|child_id| ctx.tree.elements.contains_key(child_id))
-        .collect();
-    let positions = child_positions(ctx.tree, &child_ids);
-    for (child_id, position) in child_ids.into_iter().zip(positions) {
-        el = el.child(build_element(child_id, position, ctx, window, cx));
-    }
-    pop_child_rules(saved_direct, pushed, ctx);
-
-    el.into_any_element()
 }
 
 /// Explicit `userSelect` on this node. `None` means inherit; the ancestor

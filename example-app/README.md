@@ -1,9 +1,10 @@
 # GPUIX todo app
 
-A small todo app that renders on the GPU. Copy this folder to start a project.
+A small todo app that renders on the GPU. Create a copy with the GPUIX CLI.
 
 ```bash
-bun install
+bunx @gpuix/cli new my-app
+cd my-app
 bun run dev
 ```
 
@@ -67,18 +68,13 @@ importing the file does not open a window. `getPaintedText()` returns every
 string painted last frame; the trash button only exists while the row is
 hovered, so `hover()` comes first.
 
-## Copy it out of this repo
+## Create a standalone copy
 
-This folder uses `"@gpuix/react": "workspace:^"`. Change that to a version range
-and it installs from npm:
+The CLI downloads this folder and replaces its workspace dependency with the
+latest published `@gpuix/react` version:
 
-```json
-{
-  "dependencies": {
-    "@gpuix/react": "^0.4.0",
-    "react": "^19.2.4"
-  }
-}
+```bash
+bunx @gpuix/cli new my-app
 ```
 
 Nothing else in the folder depends on the repository.
